@@ -2,6 +2,8 @@
 
 A local, no-cost prototype for demonstrating how a college cybersecurity lab portal could work. It uses SQLite and a simulated lab runtime. It does not need Docker, paid hosting, a domain, or an email provider.
 
+The frontend is React with JavaScript/JSX and Vite. The API is Python with FastAPI, and local data is stored in SQLite.
+
 ## What the demo shows
 
 - Student, teacher, and administrator sign-in.

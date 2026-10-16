@@ -538,7 +538,7 @@ def assignments(user: User = Depends(require_user), db: Session = Depends(get_db
         rows = db.scalars(select(Assignment).join(AssignmentTarget).where(AssignmentTarget.student_id == user.id))
     else:
         rows = db.scalars(select(Assignment))
-    return [{"id": str(a.id), "title": a.title, "lab_id": str(a.lab_id), "class_id": str(a.class_id), "due_at": a.due_at.isoformat() if a.due_at else None, "max_attempts": a.max_attempts} for a in rows]
+    return [{"id": str(a.id), "title": a.title, "lab_id": str(a.lab_id), "class_id": str(a.class_id), "due_at": a.due_at.isoformat() if a.due_at else None, "max_attempts": a.max_attempts, "scoring_policy": a.scoring_policy} for a in rows]
 
 
 def assignment_for_student(db: Session, assignment_id: uuid.UUID, user: User) -> Assignment:
@@ -921,6 +921,8 @@ def audit_logs(user: User = Depends(require_user), db: Session = Depends(get_db)
 def assignment_results(assignment_id: uuid.UUID, user: User = Depends(require_user), db: Session = Depends(get_db)):
     role(user, "teacher", "admin")
     assignment = assignment_for_student(db, assignment_id, user) if user.role == "teacher" else db.get(Assignment, assignment_id)
+    if not assignment:
+        raise HTTPException(404, "Assignment not found")
     targets = list(db.scalars(select(AssignmentTarget).where(AssignmentTarget.assignment_id == assignment.id)))
     output = []
     for target in targets:
