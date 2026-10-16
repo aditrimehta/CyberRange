@@ -1,0 +1,19 @@
+slug: password-attacks
+title: Password Auditing in a Lab
+summary: Measure how weak passwords fail and practice responsible offline hash auditing.
+category: Identity Security
+difficulty: intermediate
+estimated_minutes: 45
+version: 1
+objectives: ["Understand password spraying and account lockout", "Audit a supplied hash fixture offline", "Recommend passphrases and MFA"]
+environment:
+  attacker: {image: cyberrange/kali-desktop:1, cpu: 1.0, memory: 2g}
+  targets: [{name: weak-auth, image: cyberrange/lab-password-target:1, hostname: weak-auth, cpu: 0.5, memory: 512m, env: {FLAG_PASSWORD: "{{flag:password}}"}, security_exceptions: [{capability: "Weak training credentials", justification: "The credentials are disposable and reachable only on this private per-session network for password-audit instruction."}]}]
+network: {internet: false}
+limits: {max_duration_minutes: 90}
+questions:
+  - {id: q1, type: mcq, prompt: "Why should an auditor avoid testing a password list against real accounts without an approved plan?", points: 10, options: ["It can lock accounts and disrupt service", "It makes TLS slower", "It changes DNS records", "It improves the password hash"], answer: "It can lock accounts and disrupt service", explanation: "Online guesses create load and may trigger lockouts or alerts.", hints: ["Consider operational impact."]}
+  - {id: q2, type: short_text, prompt: "Name one control that makes a guessed password insufficient by itself.", points: 10, accepted: ["multi factor authentication", "mfa", "rate limiting", "account lockout", "passkey"], explanation: "A second factor or strong online throttling raises the cost of compromise.", hints: ["Think about authentication beyond a single shared secret."]}
+  - {id: q3, type: numeric, prompt: "How many sample hashes are in the supplied audit fixture?", points: 10, answer: 3, tolerance: 0, explanation: "The exercise fixture has three synthetic hashes.", hints: ["Inspect the supplied hashes file."]}
+  - {id: q4, type: flag, prompt: "Use the disposable SSH account in this lab and submit the session flag from its welcome message.", points: 20, answer: "{{flag:password}}", explanation: "The welcome flag changes every session.", hints: ["Use the in-scope target name weak-auth."]}
+  - {id: q5, type: mcq, prompt: "Which storage approach best resists offline guessing after a database leak?", points: 10, options: ["Argon2id with a unique salt", "Unsalted MD5", "Reversible encryption with one shared key", "Plain text plus a hidden column"], answer: "Argon2id with a unique salt", explanation: "A memory-hard password hash makes each guess more expensive and salts prevent reusable precomputation.", hints: ["Prefer a deliberately expensive password hash."]}

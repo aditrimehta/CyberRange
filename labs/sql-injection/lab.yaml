@@ -1,0 +1,19 @@
+slug: sql-injection
+title: SQL Injection and Parameterized Queries
+summary: Trace unsafe query construction, demonstrate a login bypass, and explain the safe repair.
+category: Application Security
+difficulty: beginner
+estimated_minutes: 40
+version: 1
+objectives: ["Recognize unsafe SQL string concatenation", "Demonstrate a lab-only login bypass", "Explain parameterized query defenses"]
+environment:
+  attacker: {image: cyberrange/kali-desktop:1, cpu: 1.0, memory: 2g}
+  targets: [{name: sqli, image: cyberrange/lab-sqli:1, hostname: sqli, cpu: 0.5, memory: 512m, security_exceptions: []}]
+network: {internet: false}
+limits: {max_duration_minutes: 90}
+questions:
+  - {id: q1, type: mcq, prompt: "Which input below can turn the intentionally unsafe demo login into a true condition?", points: 10, options: ["' OR '1'='1' -- ", "admin", "<script>alert(1)</script>", "../"], answer: "' OR '1'='1' -- ", explanation: "The quote ends the value, OR adds a true predicate, and the comment removes the trailing check.", hints: ["Inspect how the sample builds its WHERE clause."]}
+  - {id: q2, type: short_text, prompt: "Name the standard defense that separates SQL code from user values.", points: 10, accepted: ["parameterized queries", "prepared statements", "parameter binding"], explanation: "Bound parameters are data and are not parsed as SQL syntax.", hints: ["The safe code uses placeholders."]}
+  - {id: q3, type: numeric, prompt: "How many sample account rows are present in the training database?", points: 10, answer: 3, tolerance: 0, explanation: "The local fixture contains three teaching records.", hints: ["Use the read-only inventory page after your demonstration."]}
+  - {id: q4, type: flag, prompt: "After the authorized lab-only login bypass, submit the flag shown on the training account page.", points: 20, answer: "{{flag:sqli}}", explanation: "The flag is generated at session start and is not shared across learners.", hints: ["The vulnerable route is only available on this private lab target."]}
+  - {id: q5, type: mcq, prompt: "Which change best prevents this injection class?", points: 10, options: ["Use parameterized SQL", "Hide the submit button", "Base64-encode the input", "Add a longer SQL comment"], answer: "Use parameterized SQL", explanation: "Encoding and client-side controls do not change how SQL parses concatenated input.", hints: ["Treat every input as untrusted data."]}

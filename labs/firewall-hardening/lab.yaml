@@ -1,0 +1,19 @@
+slug: firewall-hardening
+title: Linux Firewall Hardening
+summary: Apply a narrow inbound policy to a disposable Linux target and verify it from the attacker desktop.
+category: Defensive Security
+difficulty: intermediate
+estimated_minutes: 45
+version: 1
+objectives: ["Distinguish intended from unintended listeners", "Write a default-deny inbound policy", "Verify firewall behavior from a separate container"]
+environment:
+  attacker: {image: cyberrange/kali-desktop:1, cpu: 1.0, memory: 2g}
+  targets: [{name: target-fw, image: cyberrange/lab-firewall-target:1, hostname: target-fw, cpu: 0.5, memory: 512m, env: {FLAG_FIREWALL: "{{flag:firewall}}"}, security_exceptions: [{capability: "NET_ADMIN", justification: "The lesson requires students to configure the target firewall. The disposable target has no host ports and no route to the internet."}]}]
+network: {internet: false}
+limits: {max_duration_minutes: 90}
+questions:
+  - {id: q1, type: mcq, prompt: "What is a sound starting policy for inbound traffic on a server?", points: 10, options: ["Default deny, then allow only required services", "Allow every port", "Disable connection tracking", "Trust every source address"], answer: "Default deny, then allow only required services", explanation: "A narrow allow-list reduces unnecessary exposure.", hints: ["Begin with a policy that fails closed."]}
+  - {id: q2, type: short_text, prompt: "Which port must remain reachable for the lab's SSH administration?", points: 10, accepted: ["22", "tcp 22", "ssh 22"], explanation: "The target's authorized management service uses TCP 22.", hints: ["The target briefing lists the required service."]}
+  - {id: q3, type: numeric, prompt: "How many TCP ports should the final policy allow from the attacker container?", points: 10, answer: 2, tolerance: 0, explanation: "Only SSH and the lab's HTTP service are intended to remain reachable.", hints: ["Compare the initial scan with the target requirements."]}
+  - {id: q4, type: check, prompt: "Check that the target's extra service on TCP 8080 is no longer reachable from the attacker.", points: 20, check: {target: attacker, command: ["nmap", "-Pn", "-p", "8080", "-oG", "-", "target-fw"], stdout_contains: "8080/closed", exit_code: 0, timeout: 8}, explanation: "The platform scans from the separate attacker container and grades the result server-side.", hints: ["Use a default-deny rule, then permit only the required TCP ports."]}
+  - {id: q5, type: flag, prompt: "Read the target's firewall status banner after the intended policy has been installed, then submit the flag.", points: 20, answer: "{{flag:firewall}}", explanation: "The target includes a session-unique status marker.", hints: ["Inspect the lab's firewall status endpoint after applying rules."]}
