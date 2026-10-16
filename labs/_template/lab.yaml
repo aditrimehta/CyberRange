@@ -1,0 +1,19 @@
+slug: new-lab-slug
+title: New Lab Title
+summary: A concise learner-facing description.
+category: Security Fundamentals
+difficulty: beginner
+estimated_minutes: 30
+version: 1
+objectives: ["State one measurable learning objective"]
+environment:
+  attacker: {image: cyberrange/kali-desktop:1, cpu: 1.0, memory: 2g}
+  targets: []
+network: {internet: false}
+limits: {max_duration_minutes: 90}
+questions:
+  - {id: q1, type: mcq, prompt: "Replace with an instructional question", points: 10, options: ["A", "B"], answer: "A", explanation: "Explain the answer.", hints: ["Give a useful hint."]}
+  - {id: q2, type: short_text, prompt: "Replace with a short-text question", points: 10, accepted: ["sample"], explanation: "Explain the answer."}
+  - {id: q3, type: numeric, prompt: "Replace with a numeric question", points: 10, answer: 2, tolerance: 0, explanation: "Explain the answer."}
+  - {id: q4, type: flag, prompt: "Replace with a session flag question", points: 10, answer: "{{flag:sample}}", explanation: "Explain the answer."}
+  - {id: q5, type: check, prompt: "Replace with a fixed-command check", points: 10, check: {target: attacker, command: ["true"], exit_code: 0}, explanation: "Explain the answer."}
