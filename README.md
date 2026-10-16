@@ -1,6 +1,6 @@
 # Cyber Range — College Demo
 
-A local, no-cost prototype for demonstrating how a college cybersecurity lab portal could work. It uses SQLite and a simulated lab runtime. It does not need Docker, paid hosting, a domain, or an email provider.
+A local, no-cost prototype for demonstrating how a college cybersecurity lab portal could work. It uses SQLite and local Docker containers for three hands-on labs. It does not need paid hosting, a domain, or an email provider.
 
 The frontend is React with JavaScript/JSX and Vite. The API is Python with FastAPI, and local data is stored in SQLite.
 
@@ -8,13 +8,15 @@ The frontend is React with JavaScript/JSX and Vite. The API is Python with FastA
 
 - Student, teacher, and administrator sign-in.
 - Classes, assignments, a lab catalog, and server-side answer grading.
-- Six guided cybersecurity lesson examples.
-- A simulated lab workspace that shows session evidence and lets students submit and review graded answers. It does not run Kali tools or vulnerable target containers.
+- Six guided cybersecurity lesson examples. Nmap reconnaissance and SQL injection use disposable Docker targets on a private network; security log analysis searches a bundled synthetic log. The other three lessons remain guided exercises.
+- Students can run the fixed lab actions, submit answers, and review their score and feedback. The app does not offer an unrestricted terminal or scan arbitrary networks.
 - Admin controls for local demo accounts and enabling or hiding lessons. Temporary passwords and reset messages appear in the API terminal; no email provider is needed.
 
 ## Run locally on Windows
 
-Install Python 3.12 and Node.js 22. Open three PowerShell terminals in this project folder.
+Install Python 3.12, Node.js 22, and Docker Desktop. Start Docker Desktop before opening a hands-on Nmap or SQL injection lab. Open three PowerShell terminals in this project folder.
+
+In a new terminal, confirm Docker is ready with `docker --version` and `docker compose version`. If PowerShell says `docker` is not recognized after installing Docker Desktop, close and reopen VS Code so its terminal picks up the Docker CLI path.
 
 **Terminal 1 — start the API.**
 
@@ -42,13 +44,13 @@ npm ci
 npm run dev
 ```
 
-Open [http://localhost:5173](http://localhost:5173). Keep the API and website terminals running while you use the demo. The SQLite database is created at `backend/cyberrange.db`.
+Open [http://localhost:5173](http://localhost:5173). Keep the API and website terminals running while you use the demo. The SQLite database is created at `backend/cyberrange.db`. The first Nmap or SQL injection session builds the small target images and may take a few minutes; it needs internet access for that initial download.
 
 Teacher, student, and administrator walkthroughs are in [docs/TEACHER_GUIDE.md](docs/TEACHER_GUIDE.md), [docs/STUDENT_GUIDE.md](docs/STUDENT_GUIDE.md), and [docs/ADMIN_GUIDE.md](docs/ADMIN_GUIDE.md).
 
 ## What's intentionally outside this demo
 
-Real lab containers, public deployment, TLS, email verification, and production hosting are outside this prototype. See [docs/LOCAL_DEMO.md](docs/LOCAL_DEMO.md) for a short presentation guide.
+Public deployment, TLS, email verification, and production hosting are outside this prototype. Lab containers are restricted to local, isolated sessions. See [docs/LOCAL_DEMO.md](docs/LOCAL_DEMO.md) for a short presentation guide.
 
 ## Starter lessons
 

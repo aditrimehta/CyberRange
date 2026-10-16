@@ -1,0 +1,7 @@
+2026-10-17T09:01:12Z src=192.0.2.10 actor=alex action=login result=success
+2026-10-17T09:03:42Z src=192.0.2.44 actor=unknown action=login result=failed
+2026-10-17T09:03:48Z src=192.0.2.44 actor=unknown action=login result=failed
+2026-10-17T09:03:54Z src=192.0.2.44 actor=unknown action=login result=failed
+2026-10-17T09:04:00Z src=192.0.2.44 actor=unknown action=login result=blocked
+2026-10-17T09:15:03Z src=192.0.2.10 actor=alex action=file_download file=weekly-report.csv result=success
+2026-10-17T09:17:29Z src=192.0.2.10 actor=alex action=file_upload file=draft.zip result=success

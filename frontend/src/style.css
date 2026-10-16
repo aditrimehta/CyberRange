@@ -8,3 +8,32 @@
 
 .success-banner{margin:12px 0;padding:12px 14px;border:1px solid #83d6b6;border-radius:9px;background:#eafaf3;color:#145c43;font-size:12px}
 
+.lab-action-panel{display:flex;flex-direction:column;min-width:0}.lab-action-content{padding:18px;display:grid;gap:12px;align-content:start}.lab-action-content p{margin:0;color:var(--muted);font-size:12px;line-height:1.55}.lab-action-content label{display:grid;gap:6px;color:var(--ink);font-size:11px;font-weight:600}.lab-action-content input{width:100%;min-width:0;padding:10px 11px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink);font:inherit}.lab-action-buttons{display:flex;gap:8px;flex-wrap:wrap}.lab-action-content .button{justify-self:start}.lab-action-output{max-height:260px;overflow:auto;margin:0;padding:13px;border:1px solid var(--line);border-radius:8px;background:#0d1820;color:#b9f3dd;font:11px/1.6 'DM Mono',monospace;white-space:pre-wrap;overflow-wrap:anywhere}.lab-action-hint code{padding:2px 4px;border-radius:4px;background:var(--surface-soft,var(--line));color:var(--ink)}
+.lab-action-hint code{padding:2px 4px;border-radius:4px;background:var(--surface-soft,var(--line));color:var(--ink)}
+
+/* Readability pass: keep small labels and workspace copy comfortably legible. */
+:root{font-size:16px}
+#root :is(p,label,input,select,button,a,td,th,.muted,.breadcrumbs,.nav-item,.safety-note,.profile-copy strong,.profile-copy span,.eyebrow,.tag,.difficulty,.lab-meta,.assignment-info span,.due-label,.result-count,.filter-tabs button,.card-action,.bottom-callout p,.bottom-callout strong){font-size:max(14px,1em)}
+.workspace-guide{padding:26px;line-height:1.8}
+.workspace-guide p,.workspace-guide li{font-size:16px;line-height:1.8;color:var(--ink)}
+.workspace-guide h1,.workspace-guide h2,.workspace-guide h3{line-height:1.35;margin-top:1.2em}
+.workspace-guide code{font-size:.95em}
+.workspace-grid{gap:22px;align-items:start}
+.question-panel{padding:22px;line-height:1.7}
+.question-panel p,.question-panel label,.question-panel input,.question-panel textarea{font-size:15px;line-height:1.65}
+.lab-action-content{padding:22px;gap:16px}
+.lab-action-content p,.lab-action-content label{font-size:15px;line-height:1.7}
+.lab-action-content .eyebrow{font-size:13px;letter-spacing:1px}
+.lab-explainer{padding:16px;background:var(--bg);border:1px solid var(--line);border-radius:10px;display:grid;gap:12px}
+.lab-explainer p,.lab-explainer li{font-size:15px;line-height:1.75;color:var(--ink)}
+.lab-explainer ol{margin:0;padding-left:24px;display:grid;gap:6px}
+.lab-success-hint{padding:11px 13px;border-left:4px solid var(--teal);background:var(--mint);border-radius:5px}
+.lab-step-heading{margin:4px 0 0}
+.lab-progress{padding:10px 12px;background:var(--mint);border-radius:8px;color:var(--ink)!important;font-weight:600}
+.lab-results{display:grid;gap:8px;min-width:0}
+.lab-results>strong{font-size:14px}
+.lab-action-output{font-size:14px;line-height:1.7;max-height:340px}
+.lab-action-content .button{min-height:44px;padding:8px 16px;font-size:14px}
+.lab-action-content input{min-height:44px;font-size:16px}
+.lab-action-content .desktop-footer{font-size:13px;line-height:1.6}
+@media(max-width:640px){.workspace-guide{padding:19px}.lab-action-content{padding:17px}.lab-explainer{padding:13px}.lab-explainer p,.lab-explainer li,.lab-action-content p{font-size:14px}.workspace-grid{gap:16px}}

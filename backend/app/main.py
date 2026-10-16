@@ -5,6 +5,7 @@ import smtplib
 import uuid
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
+from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
@@ -23,13 +24,13 @@ from app.db import Base, SessionLocal, engine, get_db
 from app.grading import grade
 from app.labs import load_packages, public_manifest
 from app.models import Assignment, AssignmentTarget, Attempt, AuditLog, AuthSession, ClassMember, Classroom, EmailVerificationToken, Lab, LabQuestion, LabSession, PasswordResetToken, PlatformSetting, User, now
-from app.runtime import FakeRuntime
+from app.runtime import DockerLabRuntime
 from app.security import decrypt, digest, encrypt, expires_in, hash_password, token, verify_password
 
 settings = get_settings()
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger("cyberrange")
-runtime = FakeRuntime()
+runtime = DockerLabRuntime()
 scheduler = BackgroundScheduler(daemon=True)
 app = FastAPI(title="Cyber Range API", version="0.1.0", docs_url="/api/docs", openapi_url="/api/openapi.json")
 limiter = Limiter(key_func=get_remote_address)
@@ -105,6 +106,11 @@ class LaunchBody(BaseModel):
 
 class AnswersBody(BaseModel):
     answers: dict[str, Any]
+
+
+class LabActionBody(BaseModel):
+    action: str = Field(min_length=1, max_length=32)
+    values: dict[str, str] = Field(default_factory=dict)
 
 
 def audit(db: Session, actor: uuid.UUID | None, action: str, target_type: str, target_id: str | None = None, metadata: dict[str, Any] | None = None, ip: str | None = None) -> None:
@@ -207,6 +213,7 @@ def startup() -> None:
     # Packages are validated during startup; `labs sync` imports them into the configured database.
     load_packages(settings.lab_root)
     with SessionLocal() as db:
+        sync_packages(db)
         for setting in db.scalars(select(PlatformSetting)):
             if hasattr(settings, setting.key):
                 setattr(settings, setting.key, setting.value)
@@ -587,7 +594,10 @@ def launch(body: LaunchBody, request: Request, user: User = Depends(require_user
     # Manifest flag keys create session-specific answers for grading.
     row.secrets_encrypted = encrypt(json.dumps(secret_map))
     db.add(row)
-    db.flush()
+    # Persist the starting state before runtime.start(), which may take several
+    # seconds. Holding SQLite's write transaction during container startup
+    # blocks other API requests from writing to the database.
+    db.commit()
     try:
         row.runtime_refs = runtime.start(row, lab.manifest, secret_map)
         row.status = "running"
@@ -596,7 +606,8 @@ def launch(body: LaunchBody, request: Request, user: User = Depends(require_user
         row.end_reason = "runtime_start_failed"
         logger.error(json.dumps({"event": "session.start_failed", "session_id": str(row.id), "error_type": type(exc).__name__}))
         db.commit()
-        raise HTTPException(503, "Lab could not be started") from exc
+        message = str(exc) if isinstance(exc, RuntimeError) else "Lab could not be started"
+        raise HTTPException(503, message) from exc
     audit(db, user.id, "session.started", "lab_session", str(row.id), {"lab": lab.slug}, request.client.host if request.client else None)
     db.commit()
     return {"id": str(row.id), "lab_id": str(lab.id), "status": row.status, "mode": row.mode, "expires_at": row.expires_at.isoformat(), "workspace_url": None}
@@ -642,6 +653,14 @@ def submit(session_id: uuid.UUID, body: AnswersBody, request: Request, user: Use
     row = session_access(db, user, session_id)
     if row.user_id != user.id or row.status != "running":
         raise HTTPException(403, "Cannot submit this session")
+    lab = db.get(Lab, row.lab_id)
+    evidence = row.runtime_refs.get("lab_evidence", {})
+    if lab.slug == "nmap-network-recon" and not evidence.get("scan_completed"):
+        raise HTTPException(409, "Run the service scan before submitting this lab")
+    if lab.slug == "sql-injection" and not (evidence.get("vulnerable_bypass_observed") and evidence.get("safe_query_observed")):
+        raise HTTPException(409, "Demonstrate the vulnerable bypass and compare it with the safe query before submitting")
+    if lab.slug == "traffic-forensics" and not {"192.0.2.44", "file_upload"}.issubset(set(evidence.get("log_searches", []))):
+        raise HTTPException(409, "Search the failed-login source and the file upload before submitting")
     questions = list(db.scalars(select(LabQuestion).where(LabQuestion.lab_id == row.lab_id).order_by(LabQuestion.position)))
     if not set(body.answers).issubset({q.qid for q in questions}):
         raise HTTPException(422, "Unknown question id")
@@ -697,6 +716,66 @@ def connect(session_id: uuid.UUID, user: User = Depends(require_user), db: Sessi
     # evidence only to the authenticated owner of this running demo session.
     evidence = [f"Simulated training flag: {value}" for key, value in secret_map.items() if key != "vnc"]
     return {"url": "", "vnc_password": None, "placeholder": True, "evidence": evidence}
+
+
+@app.post("/api/lab-sessions/{session_id}/actions")
+@limiter.limit("20/minute")
+def lab_action(session_id: uuid.UUID, body: LabActionBody, request: Request, user: User = Depends(require_user), db: Session = Depends(get_db)):
+    row = session_access(db, user, session_id)
+    if row.user_id != user.id or row.status != "running":
+        raise HTTPException(403, "This lab session is not available")
+    lab = db.get(Lab, row.lab_id)
+    values = body.values
+    if lab.slug == "nmap-network-recon" and body.action == "scan":
+        if values:
+            raise HTTPException(422, "This scan does not accept command options")
+        if not hasattr(runtime, "lab_action"):
+            raise HTTPException(503, "Hands-on labs are unavailable")
+        try:
+            result = runtime.lab_action(row.runtime_refs, "scan", {})
+        except RuntimeError as exc:
+            raise HTTPException(503, str(exc)) from exc
+    elif lab.slug == "sql-injection" and body.action in {"vulnerable_login", "safe_login"}:
+        if set(values) != {"username", "password"} or any(len(value) > 120 for value in values.values()):
+            raise HTTPException(422, "Enter a username and password of at most 120 characters")
+        if not hasattr(runtime, "lab_action"):
+            raise HTTPException(503, "Hands-on labs are unavailable")
+        try:
+            result = runtime.lab_action(row.runtime_refs, body.action, values)
+        except RuntimeError as exc:
+            raise HTTPException(503, str(exc)) from exc
+    elif lab.slug == "traffic-forensics" and body.action == "search_logs":
+        query = values.get("query", "").strip()
+        if set(values) != {"query"} or not 2 <= len(query) <= 80:
+            raise HTTPException(422, "Enter a search term between 2 and 80 characters")
+        if row.runtime_refs.get("runtime") != "local-logs":
+            raise HTTPException(409, "This log-analysis session is not running")
+        log_path = Path(__file__).resolve().parents[2] / "labs" / "traffic-forensics" / "sample-access.log"
+        matches = [line for line in log_path.read_text(encoding="utf-8").splitlines() if query.casefold() in line.casefold()][:20]
+        result = {"output": "\n".join(matches) if matches else "No matching evidence found.", "exit_code": 0, "matches": len(matches)}
+    else:
+        raise HTTPException(422, "That action is not available in this lab")
+    evidence = row.runtime_refs.setdefault("lab_evidence", {})
+    if lab.slug == "nmap-network-recon" and result.get("exit_code") == 0:
+        evidence["scan_completed"] = True
+    elif lab.slug == "sql-injection":
+        try:
+            accounts = json.loads(result.get("output", "{}")).get("matched_accounts", [])
+        except (json.JSONDecodeError, AttributeError):
+            accounts = []
+        if body.action == "vulnerable_login":
+            evidence["vulnerable_bypass_observed"] = len(accounts) > 1
+            evidence["vulnerable_input"] = values["username"] if len(accounts) > 1 else None
+        elif body.action == "safe_login":
+            evidence["safe_query_observed"] = len(accounts) == 0 and values["username"] == evidence.get("vulnerable_input")
+    elif lab.slug == "traffic-forensics" and result.get("matches", 0):
+        searched = set(evidence.get("log_searches", []))
+        searched.add(values["query"].strip().casefold())
+        evidence["log_searches"] = sorted(searched)
+    row.last_activity_at = now()
+    audit(db, user.id, "lab.action", "lab_session", str(row.id), {"lab": lab.slug, "action": body.action}, request.client.host if request.client else None)
+    db.commit()
+    return result
 
 
 @app.get("/internal/lab-auth")
@@ -845,7 +924,11 @@ def sync_labs(user: User = Depends(require_user), db: Session = Depends(get_db))
 
 
 def sync_packages(db: Session) -> int:
-    packages = load_packages(settings.lab_root)
+    # Keep the college prototype focused on the three guided, hands-on labs.
+    prototype_slugs = {"nmap-network-recon", "sql-injection", "traffic-forensics"}
+    packages = [package for package in load_packages(settings.lab_root) if package[0]["slug"] in prototype_slugs]
+    for extra_lab in db.scalars(select(Lab).where(Lab.slug.notin_(prototype_slugs))):
+        extra_lab.enabled = False
     for manifest, guide in packages:
         lab = db.scalar(select(Lab).where(Lab.slug == manifest["slug"]))
         if not lab:
@@ -854,7 +937,8 @@ def sync_packages(db: Session) -> int:
             db.flush()
         else:
             for key in ("title", "summary", "category", "difficulty", "estimated_minutes", "version", "manifest", "guide_markdown"):
-                setattr(lab, key, guide if key == "guide_markdown" else manifest.get(key, "") if key == "summary" else manifest[key])
+                value = guide if key == "guide_markdown" else manifest if key == "manifest" else manifest.get(key, "") if key == "summary" else manifest[key]
+                setattr(lab, key, value)
         existing = {q.qid: q for q in db.scalars(select(LabQuestion).where(LabQuestion.lab_id == lab.id))}
         for position, item in enumerate(manifest["questions"]):
             answer_keys = {"answer", "accepted", "regex", "tolerance", "check", "flag_key"}
@@ -874,7 +958,7 @@ def sync_packages(db: Session) -> int:
 @app.get("/api/admin/settings")
 def get_admin_settings(user: User = Depends(require_user), db: Session = Depends(get_db)):
     role(user, "admin")
-    return {"max_active_sessions": settings.max_active_sessions, "max_sessions_per_user": settings.max_sessions_per_user, "default_idle_minutes": settings.default_idle_minutes, "default_max_duration_minutes": settings.default_max_duration_minutes, "allow_session_extension": settings.allow_session_extension, "runtime": "fake"}
+    return {"max_active_sessions": settings.max_active_sessions, "max_sessions_per_user": settings.max_sessions_per_user, "default_idle_minutes": settings.default_idle_minutes, "default_max_duration_minutes": settings.default_max_duration_minutes, "allow_session_extension": settings.allow_session_extension, "runtime": "Docker-backed local labs"}
 
 
 @app.patch("/api/admin/settings")
@@ -896,7 +980,7 @@ def update_admin_settings(body: SettingPatch, user: User = Depends(require_user)
 def system(user: User = Depends(require_user), db: Session = Depends(get_db)):
     role(user, "admin")
     rows = list(db.scalars(select(LabSession).where(LabSession.status.in_(["starting", "running"]))))
-    return {"active_sessions": len(rows), "capacity": settings.max_active_sessions, "runtime": "fake", "sessions": [{"id": str(s.id), "owner_id": str(s.user_id), "lab_id": str(s.lab_id), "status": s.status, "stats": runtime.stats(s.runtime_refs)} for s in rows]}
+    return {"active_sessions": len(rows), "capacity": settings.max_active_sessions, "runtime": "Docker-backed for Nmap and SQL labs", "sessions": [{"id": str(s.id), "owner_id": str(s.user_id), "lab_id": str(s.lab_id), "status": s.status, "stats": runtime.stats(s.runtime_refs)} for s in rows]}
 
 
 @app.post("/api/admin/system/terminate-all")

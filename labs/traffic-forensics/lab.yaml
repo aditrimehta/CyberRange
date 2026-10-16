@@ -1,14 +1,14 @@
 slug: traffic-forensics
-title: Network Traffic Analysis and Forensics
-summary: Inspect a deterministic packet capture for application credentials, DNS activity, and a small exfiltration pattern.
+title: Security Log Analysis
+summary: Search a synthetic access log to reconstruct a short account-abuse incident.
 category: Digital Forensics
 difficulty: beginner
-estimated_minutes: 35
-version: 1
-objectives: ["Filter and inspect a packet capture", "Recognize cleartext protocols", "Build a concise evidence timeline"]
+estimated_minutes: 20
+version: 2
+objectives: ["Search an application log", "Identify repeated failed logins", "Build a concise evidence timeline"]
 questions:
-  - {id: q1, type: mcq, prompt: "Which protocol exposes the sample FTP login in clear text?", points: 10, options: ["FTP", "SSH", "HTTPS", "DNSSEC"], answer: "FTP", explanation: "The capture uses classic FTP, whose USER and PASS commands are not encrypted.", hints: ["Filter the capture for ftp.request.command."]}
-  - {id: q2, type: short_text, prompt: "Which domain is the client's repeated DNS lookup for?", points: 10, accepted: ["updates.example.test", "updates.example.test."], explanation: "The deterministic capture contains a repeated lookup for that training domain.", hints: ["Use the DNS query name field."]}
-  - {id: q3, type: numeric, prompt: "How many HTTP form submissions appear in the capture?", points: 10, answer: 1, tolerance: 0, explanation: "There is one synthetic form submission.", hints: ["Filter on http.request.method == POST."]}
-  - {id: q4, type: flag, prompt: "Find the marker embedded in the small exfiltration-shaped HTTP request and submit it.", points: 20, answer: "{{flag:pcap}}", explanation: "The generator inserts a per-session marker in the synthetic capture.", hints: ["Follow the HTTP stream for the final request."]}
-  - {id: q5, type: mcq, prompt: "What is the key defensive lesson from the cleartext FTP exchange?", points: 10, options: ["Credentials can be read from captured traffic", "FTP encrypts all commands by default", "DNS hides all application data", "PCAP files encrypt passwords"], answer: "Credentials can be read from captured traffic", explanation: "Use encrypted management protocols and protect capture files as sensitive evidence.", hints: ["Consider what a passive observer can see."]}
+  - {id: q1, type: short_text, prompt: "Which user account logged in successfully at 09:01 UTC?", points: 10, accepted: [alex], explanation: "The first record shows a successful login for alex.", hints: ["Search the log for result=success."]}
+  - {id: q2, type: short_text, prompt: "Which source address generated the burst of failed logins?", points: 10, accepted: [192.0.2.44], explanation: "Three failed attempts and a block event came from this reserved training address.", hints: ["Search for result=failed and compare src values."]}
+  - {id: q3, type: numeric, prompt: "How many failed login events occurred before the account was blocked?", points: 10, answer: 3, tolerance: 0, explanation: "There are three failed records followed by one blocked record.", hints: ["Search the log for result=failed."]}
+  - {id: q4, type: short_text, prompt: "What file did alex upload at 09:17 UTC?", points: 20, accepted: [draft.zip], explanation: "The upload record identifies draft.zip.", hints: ["Search for action=file_upload."]}
+  - {id: q5, type: mcq, prompt: "What is the strongest immediate response to repeated failed logins followed by a block?", points: 10, options: ["Review the source and account activity", "Delete all logs", "Disable audit logging", "Ignore the block event"], answer: "Review the source and account activity", explanation: "Correlate the source, account, and surrounding events before deciding on containment.", hints: ["Use the timestamp and source fields together."]}

@@ -1,14 +1,14 @@
 slug: nmap-network-recon
 title: Network Reconnaissance with Nmap
-summary: Map an isolated target, identify exposed services, and read a banner.
+summary: Scan a private training target and identify its intentionally exposed services.
 category: Network Security
 difficulty: beginner
-estimated_minutes: 35
-version: 1
-objectives: ["Discover live hosts and open ports", "Identify service versions and interpret banners", "Use a scan plan that minimizes noise"]
+estimated_minutes: 25
+version: 2
+objectives: ["Run a bounded TCP service scan", "Identify service banners", "Explain why scanning scope matters"]
 questions:
-  - {id: q1, type: mcq, prompt: "Which TCP port is the FTP control service listening on?", points: 10, options: [20, 21, 22, 23], answer: 21, explanation: "FTP control normally uses TCP port 21.", hints: ["Start with a TCP connect scan."]}
-  - {id: q2, type: numeric, prompt: "How many intentionally open TCP services are exposed by target1?", points: 10, answer: 4, tolerance: 0, explanation: "The lab exposes SSH, FTP, HTTP, and a non-standard TCP service.", hints: ["Scan all ports, not only common ports."]}
-  - {id: q3, type: short_text, prompt: "Which protocol is the service on port 80 using?", points: 10, accepted: ["http", "hypertext transfer protocol"], explanation: "Port 80 serves the target's HTTP page.", hints: ["Use a service/version scan."]}
-  - {id: q4, type: flag, prompt: "Submit the unique flag shown in the non-standard service banner.", points: 20, answer: "{{flag:recon}}", explanation: "Flags are generated for each session and should be treated as evidence, not guessed.", hints: ["Inspect the banner on port 9001."]}
-  - {id: q5, type: mcq, prompt: "Which Nmap option requests service and version detection?", points: 10, options: ["-sV", "-sn", "-Pn", "-n"], answer: "-sV", explanation: "-sV probes open ports to identify service versions.", hints: ["Separate host discovery from service enumeration."]}
+  - {id: q1, type: mcq, prompt: "Which service banner appears on TCP port 2222?", points: 10, options: [SSH, HTTP, DNS, SMTP], answer: SSH, explanation: "The training service returns an SSH identification banner.", hints: ["Run the scan and inspect the VERSION column."]}
+  - {id: q2, type: numeric, prompt: "How many open TCP services are found by the lab scan?", points: 10, answer: 3, tolerance: 0, explanation: "The private target exposes three intentionally open training ports.", hints: ["Count only rows marked open."]}
+  - {id: q3, type: short_text, prompt: "Which protocol serves the web page on port 8080?", points: 10, accepted: [http, "hypertext transfer protocol"], explanation: "Port 8080 serves a small HTTP training page.", hints: ["Inspect the service name for port 8080."]}
+  - {id: q4, type: short_text, prompt: "What service name is shown in the banner on port 9001?", points: 20, accepted: [inventory], explanation: "The non-standard port banner identifies the service as inventory.", hints: ["Read the version/banner text for port 9001."]}
+  - {id: q5, type: mcq, prompt: "Which Nmap option asks Nmap to identify service versions?", points: 10, options: ["-sV", "-sn", "-Pn", "-n"], answer: "-sV", explanation: "-sV enables service and version detection.", hints: ["This option appears in the fixed scan used by the workspace."]}

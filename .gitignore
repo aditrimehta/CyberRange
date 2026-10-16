@@ -9,3 +9,4 @@ __pycache__/
 *.tsbuildinfo
 *.db
 *.sqlite*
+*.egg-info/
