@@ -1,0 +1,2 @@
+# Install the API and its pinned dependencies from backend/pyproject.toml.
+-e ./backend
