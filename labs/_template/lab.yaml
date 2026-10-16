@@ -6,11 +6,6 @@ difficulty: beginner
 estimated_minutes: 30
 version: 1
 objectives: ["State one measurable learning objective"]
-environment:
-  attacker: {image: cyberrange/kali-desktop:1, cpu: 1.0, memory: 2g}
-  targets: []
-network: {internet: false}
-limits: {max_duration_minutes: 90}
 questions:
   - {id: q1, type: mcq, prompt: "Replace with an instructional question", points: 10, options: ["A", "B"], answer: "A", explanation: "Explain the answer.", hints: ["Give a useful hint."]}
   - {id: q2, type: short_text, prompt: "Replace with a short-text question", points: 10, accepted: ["sample"], explanation: "Explain the answer."}

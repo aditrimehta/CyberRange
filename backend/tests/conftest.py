@@ -2,7 +2,6 @@ import os
 import sys
 
 os.environ["DATABASE_URL"] = "sqlite:///./test-cyberrange.db"
-os.environ["RUNTIME"] = "fake"
 os.environ["APP_ENV"] = "development"
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 

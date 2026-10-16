@@ -9,7 +9,7 @@ from app.models import Attempt, Classroom, Lab, LabQuestion, LabSession, now
 
 
 def make_lab(db, slug="test-lab"):
-    manifest = {"slug": slug, "title": "Test lab", "summary": "An isolated practice exercise.", "category": "Testing", "difficulty": "beginner", "estimated_minutes": 20, "version": 1, "objectives": ["Practice safe testing"], "environment": {"attacker": {"image": "fake", "cpu": 1, "memory": "1g"}, "targets": []}, "network": {"internet": False}, "limits": {"max_duration_minutes": 90}, "questions": [{"id": "q1", "type": "mcq", "prompt": "Pick the correct answer", "points": 10, "options": ["correct", "wrong"], "answer": "correct", "explanation": "Correct because it is correct."}]}
+    manifest = {"slug": slug, "title": "Test lab", "summary": "An isolated practice exercise.", "category": "Testing", "difficulty": "beginner", "estimated_minutes": 20, "version": 1, "objectives": ["Practice safe testing"], "questions": [{"id": "q1", "type": "mcq", "prompt": "Pick the correct answer", "points": 10, "options": ["correct", "wrong"], "answer": "correct", "explanation": "Correct because it is correct."}]}
     lab = Lab(slug=slug, title="Test lab", summary=manifest["summary"], category="Testing", difficulty="beginner", estimated_minutes=20, version=1, enabled=True, manifest=manifest, guide_markdown="# Test guide")
     db.add(lab)
     db.flush()

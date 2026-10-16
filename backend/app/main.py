@@ -23,13 +23,13 @@ from app.db import Base, SessionLocal, engine, get_db
 from app.grading import grade
 from app.labs import load_packages, public_manifest
 from app.models import Assignment, AssignmentTarget, Attempt, AuditLog, AuthSession, ClassMember, Classroom, EmailVerificationToken, Lab, LabQuestion, LabSession, PasswordResetToken, PlatformSetting, User, now
-from app.runtime import DockerRuntime, FakeRuntime, LabRuntime
+from app.runtime import FakeRuntime
 from app.security import decrypt, digest, encrypt, expires_in, hash_password, token, verify_password
 
 settings = get_settings()
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger("cyberrange")
-runtime: LabRuntime = DockerRuntime() if settings.runtime == "docker" else FakeRuntime()
+runtime = FakeRuntime()
 scheduler = BackgroundScheduler(daemon=True)
 app = FastAPI(title="Cyber Range API", version="0.1.0", docs_url="/api/docs", openapi_url="/api/openapi.json")
 limiter = Limiter(key_func=get_remote_address)
@@ -205,9 +205,6 @@ def startup() -> None:
         for setting in db.scalars(select(PlatformSetting)):
             if hasattr(settings, setting.key):
                 setattr(settings, setting.key, setting.value)
-        if isinstance(runtime, DockerRuntime):
-            active = {str(item.id) for item in db.scalars(select(LabSession).where(LabSession.status.in_(["starting", "running"]))) }
-            runtime.reconcile(active)
     scheduler.add_job(reap_sessions, "interval", seconds=30, id="session-reaper", replace_existing=True)
     scheduler.start()
 
@@ -581,7 +578,7 @@ def launch(body: LaunchBody, request: Request, user: User = Depends(require_user
             key = answer[7:-2] if isinstance(answer, str) and answer.startswith("{{flag:") else question["id"]
             flags[key] = secrets.token_urlsafe(18)
     secret_map = {"vnc": token()[:8], **flags}
-    # Manifest flag keys are used for grading and injected into the target containers.
+    # Manifest flag keys create session-specific answers for grading.
     row.secrets_encrypted = encrypt(json.dumps(secret_map))
     db.add(row)
     db.flush()
@@ -596,7 +593,7 @@ def launch(body: LaunchBody, request: Request, user: User = Depends(require_user
         raise HTTPException(503, "Lab could not be started") from exc
     audit(db, user.id, "session.started", "lab_session", str(row.id), {"lab": lab.slug}, request.client.host if request.client else None)
     db.commit()
-    return {"id": str(row.id), "lab_id": str(lab.id), "status": row.status, "mode": row.mode, "expires_at": row.expires_at.isoformat(), "workspace_url": f"/lab/{row.id}/" if settings.runtime == "docker" else None}
+    return {"id": str(row.id), "lab_id": str(lab.id), "status": row.status, "mode": row.mode, "expires_at": row.expires_at.isoformat(), "workspace_url": None}
 
 
 def session_access(db: Session, user: User, session_id: uuid.UUID) -> LabSession:
@@ -688,7 +685,7 @@ def connect(session_id: uuid.UUID, user: User = Depends(require_user), db: Sessi
     if row.user_id != user.id:
         raise HTTPException(403, "Spectator desktop access is disabled")
     secret_map = json.loads(decrypt(row.secrets_encrypted))
-    return {"url": f"/lab/{row.id}/", "vnc_password": secret_map["vnc"] if settings.runtime == "docker" else None, "placeholder": settings.runtime == "fake"}
+    return {"url": "", "vnc_password": None, "placeholder": True}
 
 
 @app.get("/internal/lab-auth")
@@ -866,7 +863,7 @@ def sync_packages(db: Session) -> int:
 @app.get("/api/admin/settings")
 def get_admin_settings(user: User = Depends(require_user), db: Session = Depends(get_db)):
     role(user, "admin")
-    return {"max_active_sessions": settings.max_active_sessions, "max_sessions_per_user": settings.max_sessions_per_user, "default_idle_minutes": settings.default_idle_minutes, "default_max_duration_minutes": settings.default_max_duration_minutes, "allow_session_extension": settings.allow_session_extension, "runtime": settings.runtime}
+    return {"max_active_sessions": settings.max_active_sessions, "max_sessions_per_user": settings.max_sessions_per_user, "default_idle_minutes": settings.default_idle_minutes, "default_max_duration_minutes": settings.default_max_duration_minutes, "allow_session_extension": settings.allow_session_extension, "runtime": "fake"}
 
 
 @app.patch("/api/admin/settings")
@@ -888,7 +885,7 @@ def update_admin_settings(body: SettingPatch, user: User = Depends(require_user)
 def system(user: User = Depends(require_user), db: Session = Depends(get_db)):
     role(user, "admin")
     rows = list(db.scalars(select(LabSession).where(LabSession.status.in_(["starting", "running"]))))
-    return {"active_sessions": len(rows), "capacity": settings.max_active_sessions, "runtime": settings.runtime, "sessions": [{"id": str(s.id), "owner_id": str(s.user_id), "lab_id": str(s.lab_id), "status": s.status, "stats": runtime.stats(s.runtime_refs)} for s in rows]}
+    return {"active_sessions": len(rows), "capacity": settings.max_active_sessions, "runtime": "fake", "sessions": [{"id": str(s.id), "owner_id": str(s.user_id), "lab_id": str(s.lab_id), "status": s.status, "stats": runtime.stats(s.runtime_refs)} for s in rows]}
 
 
 @app.post("/api/admin/system/terminate-all")

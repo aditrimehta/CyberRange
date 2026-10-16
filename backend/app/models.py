@@ -3,13 +3,12 @@ from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
-from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import JSON, Uuid
 
 from app.db import Base
 
-JSON_TYPE = JSON().with_variant(JSONB, "postgresql")
+JSON_TYPE = JSON()
 
 
 def now() -> datetime:

@@ -4,7 +4,7 @@ from typing import Any
 import yaml
 from jsonschema import Draft202012Validator
 
-REQUIRED = {"slug", "title", "category", "difficulty", "estimated_minutes", "version", "questions", "environment", "network", "limits"}
+REQUIRED = {"slug", "title", "category", "difficulty", "estimated_minutes", "version", "questions"}
 KINDS = {"mcq", "short_text", "numeric", "flag", "check"}
 
 
@@ -35,8 +35,6 @@ def validate_manifest(data: dict[str, Any]) -> None:
     missing = REQUIRED - set(data or {})
     if missing:
         raise ValueError(f"Missing manifest keys: {', '.join(sorted(missing))}")
-    if data["network"].get("internet") is not False:
-        raise ValueError("Labs must set network.internet: false")
     if data["difficulty"] not in {"beginner", "intermediate", "advanced"}:
         raise ValueError("Invalid difficulty")
     if len(data["questions"]) < 5:
@@ -46,13 +44,6 @@ def validate_manifest(data: dict[str, Any]) -> None:
             raise ValueError(f"Invalid question: {q.get('id', '<missing>')}")
         if q.get("type") == "check" and not q.get("check", {}).get("command"):
             raise ValueError("Check questions require a fixed platform command")
-    targets = data["environment"].get("targets", [])
-    for target in targets:
-        for exception in target.get("security_exceptions", []):
-            if not exception.get("justification", "").strip():
-                raise ValueError("Every security exception requires a justification")
-
-
 def public_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
     clean = {k: v for k, v in manifest.items() if k not in {"questions"}}
     clean["questions"] = [{k: v for k, v in q.items() if k not in {"answer", "accepted", "regex", "tolerance", "check"}} for q in manifest["questions"]]

@@ -34,15 +34,9 @@ def test_grade_supports_mcq_text_numeric_flag_and_check():
     assert all(item["correct"] for item in results)
 
 
-def test_manifest_validator_rejects_internet_and_unjustified_exceptions():
-    base = {"slug": "sample-lab", "title": "Sample lab", "summary": "A sufficiently long summary.", "category": "Network", "difficulty": "beginner", "estimated_minutes": 30, "version": 1, "objectives": ["Measure a result"], "environment": {"attacker": {"image": "test/attacker:1", "cpu": 1, "memory": "1g"}, "targets": []}, "network": {"internet": False}, "limits": {"max_duration_minutes": 60}, "questions": [{"id": f"q{i}", "type": "mcq", "prompt": "Select the correct training answer", "points": 5, "options": ["A"], "answer": "A", "explanation": "Why it is correct."} for i in range(5)]}
+def test_manifest_validator_accepts_simple_simulated_lab():
+    base = {"slug": "sample-lab", "title": "Sample lab", "summary": "A sufficiently long summary.", "category": "Network", "difficulty": "beginner", "estimated_minutes": 30, "version": 1, "objectives": ["Measure a result"], "questions": [{"id": f"q{i}", "type": "mcq", "prompt": "Select the correct training answer", "points": 5, "options": ["A"], "answer": "A", "explanation": "Why it is correct."} for i in range(5)]}
     validate_manifest(base)
-    internet = {**base, "network": {"internet": True}}
-    with pytest.raises(ValueError, match="internet"):
-        validate_manifest(internet)
-    exception = {**base, "environment": {**base["environment"], "targets": [{"name": "target", "image": "test/target:1", "cpu": 1, "memory": "512m", "security_exceptions": [{"capability": "NET_ADMIN", "justification": ""}]}]}}
-    with pytest.raises(ValueError, match="justification"):
-        validate_manifest(exception)
 
 
 def test_public_manifest_removes_answer_material():

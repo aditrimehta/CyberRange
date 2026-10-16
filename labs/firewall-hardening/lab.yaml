@@ -6,11 +6,6 @@ difficulty: intermediate
 estimated_minutes: 45
 version: 1
 objectives: ["Distinguish intended from unintended listeners", "Write a default-deny inbound policy", "Verify firewall behavior from a separate container"]
-environment:
-  attacker: {image: cyberrange/kali-desktop:1, cpu: 1.0, memory: 2g}
-  targets: [{name: target-fw, image: cyberrange/lab-firewall-target:1, hostname: target-fw, cpu: 0.5, memory: 512m, env: {FLAG_FIREWALL: "{{flag:firewall}}"}, security_exceptions: [{capability: "NET_ADMIN", justification: "The lesson requires students to configure the target firewall. The disposable target has no host ports and no route to the internet."}]}]
-network: {internet: false}
-limits: {max_duration_minutes: 90}
 questions:
   - {id: q1, type: mcq, prompt: "What is a sound starting policy for inbound traffic on a server?", points: 10, options: ["Default deny, then allow only required services", "Allow every port", "Disable connection tracking", "Trust every source address"], answer: "Default deny, then allow only required services", explanation: "A narrow allow-list reduces unnecessary exposure.", hints: ["Begin with a policy that fails closed."]}
   - {id: q2, type: short_text, prompt: "Which port must remain reachable for the lab's SSH administration?", points: 10, accepted: ["22", "tcp 22", "ssh 22"], explanation: "The target's authorized management service uses TCP 22.", hints: ["The target briefing lists the required service."]}

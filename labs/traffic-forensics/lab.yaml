@@ -6,11 +6,6 @@ difficulty: beginner
 estimated_minutes: 35
 version: 1
 objectives: ["Filter and inspect a packet capture", "Recognize cleartext protocols", "Build a concise evidence timeline"]
-environment:
-  attacker: {image: cyberrange/kali-desktop:1, cpu: 1.0, memory: 2g}
-  targets: []
-network: {internet: false}
-limits: {max_duration_minutes: 90}
 questions:
   - {id: q1, type: mcq, prompt: "Which protocol exposes the sample FTP login in clear text?", points: 10, options: ["FTP", "SSH", "HTTPS", "DNSSEC"], answer: "FTP", explanation: "The capture uses classic FTP, whose USER and PASS commands are not encrypted.", hints: ["Filter the capture for ftp.request.command."]}
   - {id: q2, type: short_text, prompt: "Which domain is the client's repeated DNS lookup for?", points: 10, accepted: ["updates.example.test", "updates.example.test."], explanation: "The deterministic capture contains a repeated lookup for that training domain.", hints: ["Use the DNS query name field."]}

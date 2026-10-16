@@ -6,11 +6,6 @@ difficulty: intermediate
 estimated_minutes: 45
 version: 1
 objectives: ["Understand password spraying and account lockout", "Audit a supplied hash fixture offline", "Recommend passphrases and MFA"]
-environment:
-  attacker: {image: cyberrange/kali-desktop:1, cpu: 1.0, memory: 2g}
-  targets: [{name: weak-auth, image: cyberrange/lab-password-target:1, hostname: weak-auth, cpu: 0.5, memory: 512m, env: {FLAG_PASSWORD: "{{flag:password}}"}, security_exceptions: [{capability: "Weak training credentials", justification: "The credentials are disposable and reachable only on this private per-session network for password-audit instruction."}]}]
-network: {internet: false}
-limits: {max_duration_minutes: 90}
 questions:
   - {id: q1, type: mcq, prompt: "Why should an auditor avoid testing a password list against real accounts without an approved plan?", points: 10, options: ["It can lock accounts and disrupt service", "It makes TLS slower", "It changes DNS records", "It improves the password hash"], answer: "It can lock accounts and disrupt service", explanation: "Online guesses create load and may trigger lockouts or alerts.", hints: ["Consider operational impact."]}
   - {id: q2, type: short_text, prompt: "Name one control that makes a guessed password insufficient by itself.", points: 10, accepted: ["multi factor authentication", "mfa", "rate limiting", "account lockout", "passkey"], explanation: "A second factor or strong online throttling raises the cost of compromise.", hints: ["Think about authentication beyond a single shared secret."]}

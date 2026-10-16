@@ -41,9 +41,11 @@ npm run dev
 
 Open [http://localhost:5173](http://localhost:5173). Keep the API and website terminals running while you use the demo. The SQLite database is created at `backend/cyberrange.db`.
 
+Teacher, student, and administrator walkthroughs are in [docs/TEACHER_GUIDE.md](docs/TEACHER_GUIDE.md), [docs/STUDENT_GUIDE.md](docs/STUDENT_GUIDE.md), and [docs/ADMIN_GUIDE.md](docs/ADMIN_GUIDE.md).
+
 ## What's intentionally outside this demo
 
-Real lab containers, public deployment, TLS, email verification, and production hosting are not required for the college presentation. The Docker and deployment files are optional experiments; they have not been verified on this machine. See [docs/LOCAL_DEMO.md](docs/LOCAL_DEMO.md) for a short presentation guide.
+Real lab containers, public deployment, TLS, email verification, and production hosting are outside this prototype. See [docs/LOCAL_DEMO.md](docs/LOCAL_DEMO.md) for a short presentation guide.
 
 ## Starter lessons
 

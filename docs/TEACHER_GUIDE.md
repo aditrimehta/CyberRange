@@ -6,4 +6,4 @@
 4. Assign an enabled lab to a class roster. Choose a clear title and reasonable attempt count. Due dates and hard deadlines are enforced by the API.
 5. Review assignment results and export the CSV from the assignment endpoint. The live monitor lists assigned sessions and supports termination.
 
-The lab catalog exposes objectives, guides, and prompts. The API does not expose answer keys. Teacher accounts cannot spectate desktops in this release; use the monitor for status and end a session when necessary.
+The lab catalog exposes objectives, guides, and prompts. The API does not expose answer keys. The local demo uses a simulated desktop; the monitor shows session status and lets you end a session.
