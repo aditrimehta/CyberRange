@@ -5,7 +5,7 @@ from sqlalchemy import select
 
 from app.db import SessionLocal
 from app.main import runtime
-from app.models import Attempt, Classroom, Lab, LabQuestion, LabSession, now
+from app.models import Attempt, ClassMember, Classroom, Lab, LabQuestion, LabSession, now
 
 
 def make_lab(db, slug="test-lab"):
@@ -67,6 +67,18 @@ def test_student_cannot_read_another_students_session(client, csrf, users):
         db.commit()
         session_id = row.id
     assert client.get(f"/api/lab-sessions/{session_id}").status_code == 404
+
+
+def test_student_cannot_read_class_roster(client, csrf, users):
+    with SessionLocal() as db:
+        classroom = Classroom(teacher_id=users["teacher"].id, name="Private class", term="Fall", join_code="ABCD2345")
+        db.add(classroom)
+        db.flush()
+        db.add(ClassMember(class_id=classroom.id, student_id=users["other"].id))
+        db.commit()
+        class_id = classroom.id
+    response = client.get(f"/api/classes/{class_id}/members")
+    assert response.status_code == 403
 
 
 def test_class_join_and_assignment_targets_are_scoped(client, csrf, users):

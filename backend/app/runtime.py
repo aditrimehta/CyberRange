@@ -17,17 +17,7 @@ class FakeRuntime:
         self.sessions: dict[str, dict[str, Any]] = {}
 
     def start(self, session: Any, manifest: dict[str, Any], secrets: dict[str, str]) -> dict[str, Any]:
-        checks = []
-        for question in manifest.get("questions", []):
-            check = question.get("check")
-            if question.get("type") == "check" and check:
-                checks.append({
-                    "target": check["target"],
-                    "command": check["command"],
-                    "output": check.get("stdout_contains", ""),
-                    "exit_code": check.get("exit_code", 0),
-                })
-        refs = {"session_id": str(session.id), "status": "running", "started": True, "checks": checks}
+        refs = {"session_id": str(session.id), "status": "running", "started": True}
         self.sessions[str(session.id)] = refs
         return refs
 
@@ -38,9 +28,8 @@ class FakeRuntime:
         return refs.get("status", "stopped")
 
     def exec(self, refs: dict[str, Any], target: str, command: list[str], timeout: int = 5) -> tuple[str, int]:
-        for check in refs.get("checks", []):
-            if check["target"] == target and check["command"] == command:
-                return check["output"], check["exit_code"]
+        # The local simulation does not run commands, so it cannot pass a
+        # command check by returning the expected output from the manifest.
         return "", 1
 
     def list_managed(self) -> list[dict[str, Any]]:

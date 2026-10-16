@@ -1,6 +1,6 @@
 ## Prototype note
 
-This local college prototype uses a simulated workspace. It does not launch security tools or target systems. Treat command examples as discussion prompts and complete the exercise by answering the questions in the app.
+This local college prototype simulates the lab workspace. It does not run security tools or contact target systems. Any tools, hosts, credentials, commands, or attack steps below are fictional case-study material; do not execute them. Use the written scenario to answer the questions, then select Start demo session to reveal synthetic flag evidence when a lesson asks for it.
 
 # Linux firewall hardening
 

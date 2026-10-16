@@ -7,7 +7,8 @@ A local, no-cost prototype for demonstrating how a college cybersecurity lab por
 - Student, teacher, and administrator sign-in.
 - Classes, assignments, a lab catalog, and server-side answer grading.
 - Six guided cybersecurity lesson examples.
-- A simulated desktop/session view. The fake runtime does not execute Kali tools or vulnerable target containers.
+- A simulated lab workspace that shows session evidence and lets students submit and review graded answers. It does not run Kali tools or vulnerable target containers.
+- Admin controls for local demo accounts and enabling or hiding lessons. Temporary passwords and reset messages appear in the API terminal; no email provider is needed.
 
 ## Run locally on Windows
 
@@ -29,7 +30,7 @@ py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe .\scripts\seed_dev.py
 ```
 
-The script prints the demo sign-in credentials and student join code.
+The script prints the demo sign-in credentials and student join code. Local account setup and password reset messages are printed in the API terminal.
 
 **Terminal 3 — start the website.**
 

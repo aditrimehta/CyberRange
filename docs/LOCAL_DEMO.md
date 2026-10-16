@@ -2,7 +2,7 @@
 
 ## Scope
 
-This is a presentation prototype for one computer. It uses a local SQLite file and the `FakeRuntime`. Lab guides, accounts, class assignments, submissions, and grading are available; the desktop is a placeholder and does not run security tools. No online account or paid service is needed.
+This is a presentation prototype for one computer. It uses a local SQLite file and the `FakeRuntime`. Lab guides, accounts, class assignments, submissions, and grading are available. The simulated workspace shows per-session evidence but does not run security tools or contact target systems. No email provider or paid service is needed.
 
 ## Demo flow
 
@@ -11,7 +11,7 @@ This is a presentation prototype for one computer. It uses a local SQLite file a
 3. Sign in as a student in another browser profile, open a lesson, enter answers, and submit them.
 4. Return to the teacher profile to show the submitted result.
 
-The seed script prints the credentials and join code. Keep those local to the demo and do not reuse them for real accounts.
+The seed script prints the credentials and join code. Keep those local to the demo and do not reuse them for real accounts. Account setup and password reset messages appear in the API terminal; keep it private.
 
 ## Stop and reset
 

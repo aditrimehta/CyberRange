@@ -5,6 +5,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    app_env: str = "development"
     database_url: str = "sqlite:///./cyberrange.db"
     session_secret: str = "development-only-change-me-32-chars"
     session_cookie: str = "cr_session"
@@ -16,7 +17,7 @@ class Settings(BaseSettings):
     default_idle_minutes: int = 30
     default_max_duration_minutes: int = 180
     require_email_verification: bool = False
-    smtp_host: str = "mailpit"
+    smtp_host: str = "console"
     smtp_port: int = 1025
     smtp_user: str = ""
     smtp_password: str = ""

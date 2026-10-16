@@ -5,6 +5,7 @@ import pytest
 from app.grading import grade
 from app.labs import public_manifest, validate_manifest
 from app.security import hash_password, verify_password
+from app.runtime import FakeRuntime
 
 
 def test_argon2_password_policy_and_verification():
@@ -32,6 +33,14 @@ def test_grade_supports_mcq_text_numeric_flag_and_check():
     score, maximum, results = grade(items, {"mcq": "A", "text": " SAFE   QUERY ", "num": "23", "flag": "session-value"}, {"x": "session-value"}, Runtime(), {})
     assert (score, maximum) == (25, 25)
     assert all(item["correct"] for item in results)
+
+
+def test_fake_runtime_does_not_award_manifest_check_automatically():
+    runtime = FakeRuntime()
+    session = SimpleNamespace(id="demo-session")
+    refs = runtime.start(session, {"questions": [{"type": "check", "check": {"target": "attacker", "command": ["nmap"], "stdout_contains": "8080/closed", "exit_code": 0}}]}, {})
+    output, exit_code = runtime.exec(refs, "attacker", ["nmap"])
+    assert (output, exit_code) == ("", 1)
 
 
 def test_manifest_validator_accepts_simple_simulated_lab():

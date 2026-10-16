@@ -180,6 +180,11 @@ def start_login_session(response: Response, request: Request, db: Session, user:
 
 
 def send_email(to: str, subject: str, body: str) -> None:
+    if settings.smtp_host.lower() == "console":
+        if settings.app_env.lower() != "development":
+            raise RuntimeError("Console email is available only in development mode")
+        print(f"\n===== LOCAL DEMO EMAIL to {to}: {subject} =====\n{body}\n===== END LOCAL DEMO EMAIL =====\n", flush=True)
+        return
     msg = EmailMessage()
     msg["From"] = "cyber-range@localhost"
     msg["To"] = to
@@ -497,6 +502,7 @@ def owned_class(db: Session, user: User, class_id: uuid.UUID) -> Classroom:
 
 @app.get("/api/classes/{class_id}/members")
 def members(class_id: uuid.UUID, user: User = Depends(require_user), db: Session = Depends(get_db)):
+    role(user, "teacher", "admin")
     owned_class(db, user, class_id)
     return [{"id": str(s.id), "email": s.email, "first_name": s.first_name, "last_name": s.last_name, "joined_at": m.created_at.isoformat()} for m, s in db.execute(select(ClassMember, User).join(User, User.id == ClassMember.student_id).where(ClassMember.class_id == class_id))]
 
@@ -684,8 +690,13 @@ def connect(session_id: uuid.UUID, user: User = Depends(require_user), db: Sessi
     row = session_access(db, user, session_id)
     if row.user_id != user.id:
         raise HTTPException(403, "Spectator desktop access is disabled")
+    if row.status != "running":
+        raise HTTPException(409, "This demo session is no longer running")
     secret_map = json.loads(decrypt(row.secrets_encrypted))
-    return {"url": "", "vnc_password": None, "placeholder": True}
+    # The fake runtime has no terminal to discover flags in. Return their simulated
+    # evidence only to the authenticated owner of this running demo session.
+    evidence = [f"Simulated training flag: {value}" for key, value in secret_map.items() if key != "vnc"]
+    return {"url": "", "vnc_password": None, "placeholder": True, "evidence": evidence}
 
 
 @app.get("/internal/lab-auth")
@@ -915,7 +926,10 @@ def assignment_results(assignment_id: uuid.UUID, user: User = Depends(require_us
     for target in targets:
         student = db.get(User, target.student_id)
         attempts = list(db.scalars(select(Attempt).where(Attempt.assignment_id == assignment.id, Attempt.user_id == target.student_id).order_by(Attempt.submitted_at)))
-        output.append({"student_id": str(target.student_id), "name": f"{student.first_name} {student.last_name}", "status": "submitted" if attempts else "not started", "attempts": len(attempts), "best_score": max((a.score for a in attempts), default=None), "latest_score": attempts[-1].score if attempts else None})
+        best_score = max((a.score for a in attempts), default=None)
+        latest_score = attempts[-1].score if attempts else None
+        selected_score = best_score if assignment.scoring_policy == "best" else latest_score
+        output.append({"student_id": str(target.student_id), "name": f"{student.first_name} {student.last_name}", "status": "submitted" if attempts else "not started", "attempts": len(attempts), "score": selected_score, "best_score": best_score, "latest_score": latest_score})
     return output
 
 
@@ -956,10 +970,10 @@ def export_csv(assignment_id: uuid.UUID, user: User = Depends(require_user), db:
         owned_class(db, user, assignment.class_id)
     stream = StringIO()
     out = writer(stream)
-    out.writerow(["student_email", "attempts", "best_score", "latest_score"])
+    out.writerow(["student_email", "attempts", "selected_score", "best_score", "latest_score"])
     for row in assignment_results(assignment_id, user, db):
         student = db.get(User, uuid.UUID(row["student_id"]))
-        out.writerow([student.email, row["attempts"], row["best_score"], row["latest_score"]])
+        out.writerow([student.email, row["attempts"], row["score"], row["best_score"], row["latest_score"]])
     return PlainTextResponse(stream.getvalue(), media_type="text/csv", headers={"Content-Disposition": f"attachment; filename=assignment-{assignment_id}.csv"})
 
 
