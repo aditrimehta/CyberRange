@@ -1,4 +1,4 @@
-# Cyber Range — College Demo
+# Cyber Range: College Demo
 
 A local, no-cost prototype for demonstrating how a college cybersecurity lab portal could work. It uses SQLite and local Docker containers for three hands-on labs. It does not need paid hosting, a domain, or an email provider.
 
@@ -14,37 +14,50 @@ The frontend is React with JavaScript/JSX and Vite. The API is Python with FastA
 
 ## Run locally on Windows
 
-Install Python 3.12, Node.js 22, and Docker Desktop. Start Docker Desktop before opening a hands-on Nmap or SQL injection lab. Open three PowerShell terminals in this project folder. These commands are for a fresh clone on Windows.
+Install Python 3.12, Node.js 22, and Docker Desktop. Docker Desktop must be running for the Nmap and SQL labs. Open PowerShell terminals in the project folder. Use the returning-user steps every time you start the app after setup.
 
-In a new terminal, confirm Docker is ready with `docker --version` and `docker compose version`. If PowerShell says `docker` is not recognized after installing Docker Desktop, close and reopen VS Code so its terminal picks up the Docker CLI path.
+### Returning user: start the app
 
-**Terminal 1 — start the API.**
+You do not need to reinstall dependencies or recreate demo accounts each time.
+
+**Terminal 1: start the API**
 
 ```powershell
-py -3.12 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
 . .\scripts\demo-env.ps1
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --app-dir backend --reload
 ```
 
-**Terminal 2 — add demo accounts.**
+**Terminal 2: start the website**
+
+```powershell
+cd frontend
+npm run dev
+```
+
+Open [http://localhost:5173](http://localhost:5173). Keep both terminals running while you use the app. Stop each server with `Ctrl+C` when finished.
+
+### First setup: fresh clone or missing dependencies
+
+Install the dependencies once per clone. From the project root, run:
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+cd frontend
+npm ci
+cd ..
+```
+
+Then create demo accounts once for a fresh database. In a new PowerShell terminal opened at the project root, run:
 
 ```powershell
 . .\scripts\demo-env.ps1
 .\.venv\Scripts\python.exe .\scripts\seed_dev.py
 ```
 
-For a fresh database, the script prints the demo sign-in credentials and student join code. It refuses to recreate accounts if the demo users already exist. Local account setup and password reset messages are printed in the API terminal.
+The script prints the sign-in credentials and a randomly generated student join code. It refuses to recreate accounts if demo users already exist. Do not run it again on an already seeded database. The database is stored at `backend/cyberrange.db` and is not included in Git.
 
-**Terminal 3 — start the website.**
-
-```powershell
-cd frontend
-npm ci
-npm run dev
-```
-
-Open [http://localhost:5173](http://localhost:5173). Keep the API and website terminals running while you use the demo. The SQLite database is created at `backend/cyberrange.db`. The first Nmap or SQL injection session builds the small target images and may take a few minutes; it needs internet access for that initial download.
+If Docker is not recognized, confirm it is installed with `docker --version` and `docker compose version`. Reopen VS Code after installing Docker Desktop. The first Nmap or SQL session downloads its training images and may take a few minutes. Log analysis works without Docker.
 
 ### Demo sign-ins
 
@@ -70,10 +83,9 @@ The student join code is randomly generated and printed by the seed script. Thes
    cd CyberRange
    ```
 
-3. Open the folder in VS Code and follow the three-terminal steps above.
-4. Run the seed script once to create the demo accounts and class. The database and `.env` are local and are not included in Git.
+3. Open the folder in VS Code and complete the First setup steps above.
+4. Start the API and website using the Returning user steps above.
 5. Start Docker Desktop before launching the Nmap or SQL lab. The first run downloads the training images; log analysis works without Docker.
-6. Keep the API and Vite terminals open while using the site. Stop each server with `Ctrl+C` when finished.
 
 Teacher, student, and administrator walkthroughs are in [docs/TEACHER_GUIDE.md](docs/TEACHER_GUIDE.md), [docs/STUDENT_GUIDE.md](docs/STUDENT_GUIDE.md), and [docs/ADMIN_GUIDE.md](docs/ADMIN_GUIDE.md).
 
