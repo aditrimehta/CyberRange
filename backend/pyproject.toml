@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools==75.6.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cyber-range-api"
+version = "0.1.0"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "fastapi==0.115.6", "uvicorn[standard]==0.34.0", "sqlalchemy==2.0.36",
+  "alembic==1.14.0", "psycopg[binary]==3.2.3", "pydantic==2.10.4",
+  "pydantic-settings==2.7.0", "argon2-cffi==23.1.0", "PyYAML==6.0.2",
+  "docker==7.1.0", "APScheduler==3.10.4", "slowapi==0.1.9", "cryptography==44.0.0", "jsonschema==4.23.0"
+]
+
+[project.optional-dependencies]
+dev = ["pytest==8.3.4", "pytest-cov==6.0.0", "ruff==0.8.4", "mypy==1.13.0", "httpx==0.28.1", "pip-audit==2.7.3"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["integration: requires a Docker Engine"]
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+check_untyped_defs = true
+warn_redundant_casts = true
+warn_unused_ignores = true

@@ -1,0 +1,163 @@
+name: cyber-range
+services:
+  db:
+    image: postgres:16.6-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-cyberrange}
+      POSTGRES_USER: ${POSTGRES_USER:-cyberrange}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-development-db-password-change-me}
+    volumes: ["postgres-data:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [data]
+    restart: unless-stopped
+
+  socket-proxy:
+    image: tecnativa/docker-socket-proxy:0.3.0
+    environment:
+      CONTAINERS: 1
+      NETWORKS: 1
+      EVENTS: 1
+      INFO: 1
+      POST: 1
+      AUTH: 0
+      SECRETS: 0
+      SERVICES: 0
+      SWARM: 0
+      VOLUMES: 0
+      IMAGES: 1
+      PING: 1
+      VERSION: 1
+    volumes: ["/var/run/docker.sock:/var/run/docker.sock:ro"]
+    networks: [docker-control]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:2375/_ping | grep -q OK"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  api:
+    build: ./backend
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-cyberrange}:${POSTGRES_PASSWORD:-development-db-password-change-me}@db:5432/${POSTGRES_DB:-cyberrange}
+      SESSION_SECRET: ${SESSION_SECRET:-development-only-change-me-32-chars}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-development-db-password-change-me}
+      SECURE_COOKIES: ${SECURE_COOKIES:-false}
+      RUNTIME: ${RUNTIME:-fake}
+      DOCKER_HOST: tcp://socket-proxy:2375
+      LAB_ROOT: /labs
+      MAX_ACTIVE_SESSIONS: ${MAX_ACTIVE_SESSIONS:-40}
+      MAX_SESSIONS_PER_USER: ${MAX_SESSIONS_PER_USER:-1}
+      DEFAULT_IDLE_MINUTES: ${DEFAULT_IDLE_MINUTES:-30}
+      DEFAULT_MAX_DURATION_MINUTES: ${DEFAULT_MAX_DURATION_MINUTES:-180}
+      ALLOW_SESSION_EXTENSION: ${ALLOW_SESSION_EXTENSION:-false}
+      REQUIRE_EMAIL_VERIFICATION: ${REQUIRE_EMAIL_VERIFICATION:-false}
+      SMTP_HOST: ${SMTP_HOST:-mailpit}
+      SMTP_PORT: ${SMTP_PORT:-1025}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost}
+      DOMAIN: ${DOMAIN:-localhost}
+    volumes: ["./labs:/labs:ro", "./scripts:/scripts:ro"]
+    depends_on:
+      db: {condition: service_healthy}
+      socket-proxy: {condition: service_healthy}
+    networks: [app, data, docker-control]
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.cr-api.rule=PathPrefix(`/api`) || Path(`/healthz`) || Path(`/readyz`)
+      - traefik.http.routers.cr-api.entrypoints=web
+      - traefik.http.routers.cr-api.priority=100
+      - traefik.http.services.cr-api.loadbalancer.server.port=8000
+      - traefik.http.routers.cr-internal-auth.rule=Path(`/internal/lab-auth`)
+      - traefik.http.routers.cr-internal-auth.entrypoints=web
+      - traefik.http.routers.cr-internal-auth.priority=120
+      - traefik.http.routers.cr-internal-auth.service=cr-api
+      - traefik.http.routers.cr-internal-auth.middlewares=cr-internal-only
+      - traefik.http.middlewares.cr-internal-only.ipallowlist.sourcerange=172.31.240.10/32
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/readyz')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  web:
+    build: ./frontend
+    depends_on: [api]
+    networks: [app]
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.cr-web.rule=PathPrefix(`/`)
+      - traefik.http.routers.cr-web.entrypoints=web
+      - traefik.http.routers.cr-web.priority=1
+      - traefik.http.services.cr-web.loadbalancer.server.port=80
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  traefik:
+    image: traefik:v3.2.2
+    container_name: cyberrange-traefik
+    command:
+      - --providers.docker=true
+      - --providers.docker.endpoint=tcp://socket-proxy:2375
+      - --providers.docker.exposedbydefault=false
+      - --providers.docker.network=cyber-range_app
+      - --entrypoints.web.address=172.31.240.10:80
+      - --entrypoints.websecure.address=172.31.240.10:443
+      - --api.dashboard=false
+      - --ping=true
+      - --ping.entrypoint=web
+      - --accesslog=true
+      - --log.format=json
+      - --global.sendanonymoususage=false
+    ports:
+      - "${HTTP_BIND:-0.0.0.0}:80:80"
+      - "${HTTPS_BIND:-0.0.0.0}:443:443"
+    depends_on:
+      socket-proxy: {condition: service_healthy}
+    networks:
+      app:
+        ipv4_address: 172.31.240.10
+      docker-control: {}
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  mailpit:
+    image: axllent/mailpit:v1.22.3
+    ports: ["127.0.0.1:8025:8025"]
+    networks: [app]
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    profiles: [mail]
+    restart: unless-stopped
+
+networks:
+  app:
+    name: cyber-range_app
+    ipam:
+      config:
+        - subnet: 172.31.240.0/24
+  data:
+    internal: true
+  docker-control:
+    internal: true
+
+volumes:
+  postgres-data:

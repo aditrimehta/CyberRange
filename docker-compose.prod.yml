@@ -1,0 +1,52 @@
+services:
+  api:
+    environment:
+      APP_ENV: production
+      SECURE_COOKIES: "true"
+    labels:
+      - traefik.http.routers.cr-api.rule=Host(`${DOMAIN}`) && (PathPrefix(`/api`) || Path(`/healthz`) || Path(`/readyz`))
+      - traefik.http.routers.cr-api.entrypoints=websecure
+      - traefik.http.routers.cr-api.tls=true
+      - traefik.http.routers.cr-api.tls.certresolver=le
+      - traefik.http.routers.cr-api-http.rule=Host(`${DOMAIN}`) && (PathPrefix(`/api`) || Path(`/healthz`) || Path(`/readyz`))
+      - traefik.http.routers.cr-api-http.entrypoints=web
+      - traefik.http.routers.cr-api-http.middlewares=cr-redirect-https
+      - traefik.http.routers.cr-api-http.service=cr-api
+      - traefik.http.routers.cr-internal-auth.rule=Path(`/internal/lab-auth`)
+      - traefik.http.routers.cr-internal-auth.entrypoints=web
+      - traefik.http.routers.cr-internal-auth.tls=false
+      - traefik.http.routers.cr-internal-auth.service=cr-api
+      - traefik.http.routers.cr-internal-auth.middlewares=cr-internal-only
+      - traefik.http.middlewares.cr-internal-only.ipallowlist.sourcerange=172.31.240.10/32
+  traefik:
+    command:
+      - --providers.docker=true
+      - --providers.docker.endpoint=tcp://socket-proxy:2375
+      - --providers.docker.exposedbydefault=false
+      - --providers.docker.network=cyber-range_app
+      - --entrypoints.web.address=172.31.240.10:80
+      - --entrypoints.websecure.address=172.31.240.10:443
+      # Public routers redirect individually so the HTTP-only internal auth route remains reachable.
+      - --certificatesresolvers.le.acme.email=${ACME_EMAIL}
+      - --certificatesresolvers.le.acme.storage=/letsencrypt/acme.json
+      - --certificatesresolvers.le.acme.httpchallenge=true
+      - --certificatesresolvers.le.acme.httpchallenge.entrypoint=web
+      - --api.dashboard=false
+      - --accesslog=true
+      - --log.format=json
+    volumes:
+      - letsencrypt:/letsencrypt
+  web:
+    labels:
+      - traefik.http.routers.cr-web.rule=Host(`${DOMAIN}`)
+      - traefik.http.routers.cr-web.entrypoints=websecure
+      - traefik.http.routers.cr-web.tls=true
+      - traefik.http.routers.cr-web.tls.certresolver=le
+      - traefik.http.routers.cr-web-http.rule=Host(`${DOMAIN}`)
+      - traefik.http.routers.cr-web-http.entrypoints=web
+      - traefik.http.routers.cr-web-http.middlewares=cr-redirect-https
+      - traefik.http.routers.cr-web-http.service=cr-web
+      - traefik.http.middlewares.cr-redirect-https.redirectscheme.scheme=https
+      - traefik.http.middlewares.cr-redirect-https.redirectscheme.permanent=true
+volumes:
+  letsencrypt:
