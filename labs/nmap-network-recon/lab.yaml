@@ -1,14 +1,14 @@
 slug: nmap-network-recon
 title: Network Reconnaissance with Nmap
-summary: Scan a private training target and identify its intentionally exposed services.
+summary: Scan a private host, disable an unnecessary listener, and rescan to verify the change.
 category: Network Security
 difficulty: beginner
 estimated_minutes: 25
-version: 2
+version: 4
 objectives: ["Run a bounded TCP service scan", "Identify service banners", "Explain why scanning scope matters"]
 questions:
   - {id: q1, type: mcq, prompt: "Which service banner appears on TCP port 2222?", points: 10, options: [SSH, HTTP, DNS, SMTP], answer: SSH, explanation: "The training service returns an SSH identification banner.", hints: ["Run the scan and inspect the VERSION column."]}
-  - {id: q2, type: numeric, prompt: "How many open TCP services are found by the lab scan?", points: 10, answer: 3, tolerance: 0, explanation: "The private target exposes three intentionally open training ports.", hints: ["Count only rows marked open."]}
+  - {id: q2, type: numeric, prompt: "How many open TCP services are found by the initial baseline scan?", points: 10, answer: 3, tolerance: 0, explanation: "The private target exposes three intentionally open training ports.", hints: ["Count only rows marked open."]}
   - {id: q3, type: short_text, prompt: "Which protocol serves the web page on port 8080?", points: 10, accepted: [http, "hypertext transfer protocol"], explanation: "Port 8080 serves a small HTTP training page.", hints: ["Inspect the service name for port 8080."]}
-  - {id: q4, type: short_text, prompt: "What service name is shown in the banner on port 9001?", points: 20, accepted: [inventory], explanation: "The non-standard port banner identifies the service as inventory.", hints: ["Read the version/banner text for port 9001."]}
-  - {id: q5, type: mcq, prompt: "Which Nmap option asks Nmap to identify service versions?", points: 10, options: ["-sV", "-sn", "-Pn", "-n"], answer: "-sV", explanation: "-sV enables service and version detection.", hints: ["This option appears in the fixed scan used by the workspace."]}
+  - {id: q4, type: short_text, prompt: "What service name is shown in the banner on the port your briefing asks you to close?", points: 20, accepted: [inventory], explanation: "Read the service banner on the unnecessary listener in your session.", hints: ["Read the baseline banner on the port given in your session briefing."]}
+  - {id: q5, type: mcq, prompt: "After disabling the unnecessary service and rescanning, what is the state of its port?", points: 10, options: [closed, open, filtered, unknown], answer: closed, explanation: "The listener stopped, so the verification scan reports its port as closed.", hints: ["Compare the baseline and verification scans."]}

@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 import secrets
 import smtplib
 import uuid
@@ -25,12 +26,30 @@ from app.grading import grade
 from app.labs import load_packages, public_manifest
 from app.models import Assignment, AssignmentTarget, Attempt, AuditLog, AuthSession, ClassMember, Classroom, EmailVerificationToken, Lab, LabQuestion, LabSession, PasswordResetToken, PlatformSetting, User, now
 from app.runtime import DockerLabRuntime
+from app.scenarios import choose_log_scenario, choose_lab_profile, profile_questions, log_questions, LEGACY_SCENARIO
 from app.security import decrypt, digest, encrypt, expires_in, hash_password, token, verify_password
 
 settings = get_settings()
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger("cyberrange")
-runtime = DockerLabRuntime()
+runtime = DockerLabRuntime(settings.lab_vm_distro)
+PROTOTYPE_LAB_SLUGS = {"nmap-network-recon", "sql-injection", "traffic-forensics"}
+PASS_PERCENT = 80
+
+
+def passed_attempt(attempt):
+    return bool(attempt and attempt.max_score > 0 and attempt.score * 100 >= PASS_PERCENT * attempt.max_score)
+
+
+def attempt_outcome(attempt):
+    return {"passed": passed_attempt(attempt), "needs_reattempt": not passed_attempt(attempt),
+            "percentage": round(attempt.score / attempt.max_score * 100, 2) if attempt.max_score else 0, "pass_mark": PASS_PERCENT}
+
+
+def selected_attempt(assignment, attempts):
+    if not attempts:
+        return None
+    return max(attempts, key=lambda item: item.score / item.max_score if item.max_score else 0) if assignment.scoring_policy == 'best' else max(attempts, key=lambda item: item.submitted_at)
 scheduler = BackgroundScheduler(daemon=True)
 app = FastAPI(title="Cyber Range API", version="0.1.0", docs_url="/api/docs", openapi_url="/api/openapi.json")
 limiter = Limiter(key_func=get_remote_address)
@@ -233,8 +252,15 @@ def reap_sessions() -> int:
         rows = list(db.scalars(select(LabSession).where(LabSession.status.in_(["starting", "running"]))))
         removed = 0
         for row in rows:
+            # Allow the bounded image build/startup to finish before checking health.
+            if row.status == "starting" and now() - utc(row.started_at) < timedelta(minutes=5):
+                continue
             if utc(row.expires_at) <= now() or utc(row.last_activity_at) <= cutoff or runtime.status(row.runtime_refs) != "running":
-                runtime.stop(row.runtime_refs)
+                try:
+                    runtime.stop(row.runtime_refs)
+                except RuntimeError:
+                    logger.warning(json.dumps({"event": "session.cleanup_retry", "session_id": str(row.id)}))
+                    continue
                 row.status = "expired" if utc(row.expires_at) <= now() or utc(row.last_activity_at) <= cutoff else "failed"
                 row.end_reason = "timeout" if row.status == "expired" else "runtime_crash"
                 row.ended_at = now()
@@ -382,7 +408,7 @@ def request_reset(body: ResetRequest, request: Request, db: Session = Depends(ge
 @app.post("/api/auth/password-reset/confirm")
 def confirm_reset(body: ResetConfirm, db: Session = Depends(get_db)):
     row = db.scalar(select(PasswordResetToken).where(PasswordResetToken.token_hash == digest(body.token), PasswordResetToken.used_at.is_(None)))
-    if not row or row.expires_at < now():
+    if not row or utc(row.expires_at) < now():
         raise HTTPException(400, "Invalid or expired reset token")
     user = db.get(User, row.user_id)
     try:
@@ -402,12 +428,12 @@ def me(user: User = Depends(require_user)):
 
 @app.get("/api/labs")
 def labs(user: User = Depends(require_user), db: Session = Depends(get_db)):
-    return [{"id": str(x.id), "slug": x.slug, "title": x.title, "summary": x.summary, "category": x.category, "difficulty": x.difficulty, "estimated_minutes": x.estimated_minutes, "version": x.version, "questions": [{"id": q.qid, "type": q.type, "prompt": q.prompt, "points": q.points, "options": q.public_options, "hints": q.hints} for q in sorted(x.questions, key=lambda q: q.position)]} for x in db.scalars(select(Lab).options(joinedload(Lab.questions)).where(Lab.enabled.is_(True))).unique()]
+    return [{"id": str(x.id), "slug": x.slug, "title": x.title, "summary": x.summary, "category": x.category, "difficulty": x.difficulty, "estimated_minutes": x.estimated_minutes, "version": x.version, "questions": [{"id": q.qid, "type": q.type, "prompt": q.prompt, "points": q.points, "options": q.public_options, "hints": q.hints} for q in sorted(x.questions, key=lambda q: q.position)]} for x in db.scalars(select(Lab).options(joinedload(Lab.questions)).where(Lab.enabled.is_(True), Lab.slug.in_(PROTOTYPE_LAB_SLUGS))).unique()]
 
 
 @app.get("/api/labs/{slug}")
 def lab_detail(slug: str, user: User = Depends(require_user), db: Session = Depends(get_db)):
-    lab = db.scalar(select(Lab).options(joinedload(Lab.questions)).where(Lab.slug == slug, Lab.enabled.is_(True)))
+    lab = db.scalar(select(Lab).options(joinedload(Lab.questions)).where(Lab.slug == slug, Lab.enabled.is_(True), Lab.slug.in_(PROTOTYPE_LAB_SLUGS)))
     if not lab:
         raise HTTPException(404, "Lab not found")
     result = public_manifest(lab.manifest)
@@ -421,7 +447,7 @@ def list_classes(user: User = Depends(require_user), db: Session = Depends(get_d
         rows = list(db.scalars(select(Classroom).where(Classroom.teacher_id == user.id, Classroom.archived_at.is_(None))))
         return [{"id": str(c.id), "name": c.name, "term": c.term, "join_code": c.join_code, "join_code_enabled": c.join_code_enabled, "member_count": db.scalar(select(func.count()).select_from(ClassMember).where(ClassMember.class_id == c.id))} for c in rows]
     if user.role == "student":
-        return [{"id": str(c.id), "name": c.name, "term": c.term} for c in db.scalars(select(Classroom).join(ClassMember).where(ClassMember.student_id == user.id, Classroom.archived_at.is_(None)))]
+        return [{"id": str(c.id), "name": c.name, "joined_at": utc(member.created_at).isoformat()} for c, member in db.execute(select(Classroom, ClassMember).join(ClassMember).where(ClassMember.student_id == user.id, Classroom.archived_at.is_(None)))]
     return [{"id": str(c.id), "name": c.name, "term": c.term, "teacher_id": str(c.teacher_id)} for c in db.scalars(select(Classroom))]
 
 
@@ -519,7 +545,7 @@ def create_assignment(body: AssignmentBody, request: Request, user: User = Depen
     role(user, "teacher")
     classroom = owned_class(db, user, body.class_id)
     lab = db.get(Lab, body.lab_id)
-    if not lab or not lab.enabled:
+    if not lab or not lab.enabled or lab.slug not in PROTOTYPE_LAB_SLUGS:
         raise HTTPException(404, "Lab not found")
     if body.scoring_policy not in {"best", "latest"}:
         raise HTTPException(422, "Invalid scoring policy")
@@ -540,17 +566,20 @@ def create_assignment(body: AssignmentBody, request: Request, user: User = Depen
 @app.get("/api/assignments")
 def assignments(user: User = Depends(require_user), db: Session = Depends(get_db)):
     if user.role == "teacher":
-        rows = db.scalars(select(Assignment).join(Classroom, Classroom.id == Assignment.class_id).where(Classroom.teacher_id == user.id))
+        rows = db.scalars(select(Assignment).join(Classroom, Classroom.id == Assignment.class_id).join(Lab, Lab.id == Assignment.lab_id).where(Classroom.teacher_id == user.id, Lab.enabled.is_(True), Lab.slug.in_(PROTOTYPE_LAB_SLUGS)))
     elif user.role == "student":
-        rows = db.scalars(select(Assignment).join(AssignmentTarget).where(AssignmentTarget.student_id == user.id))
+        rows = db.scalars(select(Assignment).join(AssignmentTarget).join(Lab, Lab.id == Assignment.lab_id).where(AssignmentTarget.student_id == user.id, Lab.enabled.is_(True), Lab.slug.in_(PROTOTYPE_LAB_SLUGS)))
     else:
-        rows = db.scalars(select(Assignment))
+        rows = db.scalars(select(Assignment).join(Lab, Lab.id == Assignment.lab_id).where(Lab.enabled.is_(True), Lab.slug.in_(PROTOTYPE_LAB_SLUGS)))
     return [{"id": str(a.id), "title": a.title, "lab_id": str(a.lab_id), "class_id": str(a.class_id), "due_at": a.due_at.isoformat() if a.due_at else None, "max_attempts": a.max_attempts, "scoring_policy": a.scoring_policy} for a in rows]
 
 
 def assignment_for_student(db: Session, assignment_id: uuid.UUID, user: User) -> Assignment:
     assignment = db.get(Assignment, assignment_id)
     if not assignment:
+        raise HTTPException(404, "Assignment not found")
+    lab = db.get(Lab, assignment.lab_id)
+    if not lab or not lab.enabled or lab.slug not in PROTOTYPE_LAB_SLUGS:
         raise HTTPException(404, "Assignment not found")
     if user.role == "teacher":
         owned_class(db, user, assignment.class_id)
@@ -565,7 +594,7 @@ def assignment_for_student(db: Session, assignment_id: uuid.UUID, user: User) ->
 def launch(body: LaunchBody, request: Request, user: User = Depends(require_user), db: Session = Depends(get_db)):
     role(user, "student")
     lab = db.get(Lab, body.lab_id)
-    if not lab or not lab.enabled:
+    if not lab or not lab.enabled or lab.slug not in PROTOTYPE_LAB_SLUGS:
         raise HTTPException(404, "Lab not found")
     assignment = assignment_for_student(db, body.assignment_id, user) if body.assignment_id else None
     if assignment and assignment.lab_id != lab.id:
@@ -576,13 +605,43 @@ def launch(body: LaunchBody, request: Request, user: User = Depends(require_user
             raise HTTPException(403, "Assignment is not currently available")
         count = db.scalar(select(func.count()).select_from(Attempt).where(Attempt.user_id == user.id, Attempt.assignment_id == assignment.id)) or 0
         if count >= assignment.max_attempts:
-            raise HTTPException(403, "Attempt limit reached")
+            previous = list(db.scalars(select(Attempt).where(Attempt.user_id == user.id, Attempt.assignment_id == assignment.id)))
+            if passed_attempt(selected_attempt(assignment, previous)):
+                raise HTTPException(403, "Attempt limit reached")
+            # Below the pass mark, remediation remains available until a pass.
+    # Reconcile the student's previous environment before applying capacity limits.
+    # Reopening a lab resumes it; a different lab offers an explicit switch.
+    owned_sessions = list(db.scalars(select(LabSession).where(LabSession.user_id == user.id, LabSession.status.in_(["starting", "running"])).order_by(LabSession.started_at.desc())))
+    for existing in owned_sessions:
+        current = now()
+        expired = utc(existing.expires_at) <= current or utc(existing.last_activity_at) <= current - timedelta(minutes=settings.default_idle_minutes)
+        starting = existing.status == "starting" and current - utc(existing.started_at) < timedelta(minutes=5)
+        healthy = starting or (not expired and runtime.status(existing.runtime_refs) == "running")
+        if not healthy or expired:
+            try:
+                runtime.stop(existing.runtime_refs)
+            except RuntimeError as exc:
+                raise HTTPException(503, "The previous lab could not be cleaned up. Check Docker is running, then try again.") from exc
+            existing.status, existing.ended_at = "expired" if expired else "failed", current
+            existing.end_reason = "timeout" if expired else "runtime_crash"
+            db.commit()
+            continue
+        if existing.lab_id == lab.id and existing.assignment_id == (assignment.id if assignment else None):
+            existing.last_activity_at = current
+            db.commit()
+            return {"id": str(existing.id), "lab_id": str(existing.lab_id), "status": existing.status, "mode": existing.mode, "expires_at": utc(existing.expires_at).isoformat(), "workspace_url": None, "resumed": True}
+        if len(owned_sessions) >= settings.max_sessions_per_user:
+            existing_lab = db.get(Lab, existing.lab_id)
+            raise HTTPException(409, {"message": "Resume your current lab, or stop it before opening a different one.", "active_session": {"id": str(existing.id), "lab_title": existing_lab.title, "status": existing.status}})
     active = db.scalar(select(func.count()).select_from(LabSession).where(LabSession.status.in_(["starting", "running"]))) or 0
+    if active >= settings.max_active_sessions:
+        reap_sessions()
+        active = db.scalar(select(func.count()).select_from(LabSession).where(LabSession.status.in_(["starting", "running"]))) or 0
     mine = db.scalar(select(func.count()).select_from(LabSession).where(LabSession.user_id == user.id, LabSession.status.in_(["starting", "running"]))) or 0
     if mine >= settings.max_sessions_per_user or active >= settings.max_active_sessions:
-        raise HTTPException(429, "Lab session capacity reached")
+        raise HTTPException(429, "All lab environments are currently in use. Please try again shortly.")
     start = now()
-    duration = min(assignment.time_limit_minutes if assignment and assignment.time_limit_minutes else settings.default_max_duration_minutes, settings.default_max_duration_minutes)
+    duration = min(assignment.time_limit_minutes if assignment and assignment.time_limit_minutes else lab.estimated_minutes + 10, settings.default_max_duration_minutes)
     row = LabSession(user_id=user.id, lab_id=lab.id, assignment_id=assignment.id if assignment else None, mode="graded" if assignment else "practice", status="starting", started_at=start, last_activity_at=start, expires_at=start + timedelta(minutes=duration))
     flags = {}
     for question in lab.manifest["questions"]:
@@ -591,6 +650,11 @@ def launch(body: LaunchBody, request: Request, user: User = Depends(require_user
             key = answer[7:-2] if isinstance(answer, str) and answer.startswith("{{flag:") else question["id"]
             flags[key] = secrets.token_urlsafe(18)
     secret_map = {"vnc": token()[:8], **flags}
+    profile = choose_lab_profile(lab.slug)
+    if profile:
+        secret_map['lab_profile'] = profile
+    if lab.slug == "traffic-forensics":
+        secret_map["log_scenario"] = choose_log_scenario()
     # Manifest flag keys create session-specific answers for grading.
     row.secrets_encrypted = encrypt(json.dumps(secret_map))
     db.add(row)
@@ -631,7 +695,14 @@ def session_detail(session_id: uuid.UUID, user: User = Depends(require_user), db
     row = session_access(db, user, session_id)
     lab = db.get(Lab, row.lab_id)
     attempt = db.scalar(select(Attempt).where(Attempt.session_id == row.id).order_by(Attempt.submitted_at.desc()))
-    return {"id": str(row.id), "lab_id": str(row.lab_id), "lab_slug": lab.slug, "lab_title": lab.title, "status": row.status, "mode": row.mode, "expires_at": utc(row.expires_at).isoformat(), "attempt_id": str(attempt.id) if attempt else None, "draft_answers": row.draft_answers if row.user_id == user.id else {}}
+    profile = row.runtime_refs.get('lab_profile', {})
+    briefing = {"close_port": profile.get('close_port', 9001)} if lab.slug == 'nmap-network-recon' else {"training_payload": profile.get('payload', "' OR '1'='1' -- ")} if lab.slug == 'sql-injection' else {}
+    return {"id": str(row.id), "lab_id": str(row.lab_id), "assignment_id": str(row.assignment_id) if row.assignment_id else None, "lab_slug": lab.slug, "lab_title": lab.title, "status": row.status, "mode": row.mode, "expires_at": utc(row.expires_at).isoformat(), "attempt_id": str(attempt.id) if attempt else None, "draft_answers": row.draft_answers if row.user_id == user.id else {}, "lab_evidence": public_evidence(row), "briefing": briefing}
+
+
+def public_evidence(row: LabSession) -> dict[str, Any]:
+    evidence = row.runtime_refs.get("lab_evidence", {})
+    return {key: evidence[key] for key in ("scan_completed", "service_closed", "rescan_verified", "vulnerable_bypass_observed", "safe_query_observed", "incident_generated", "log_searches") if key in evidence}
 
 
 @app.post("/api/lab-sessions/{session_id}/answers-draft")
@@ -655,25 +726,36 @@ def submit(session_id: uuid.UUID, body: AnswersBody, request: Request, user: Use
         raise HTTPException(403, "Cannot submit this session")
     lab = db.get(Lab, row.lab_id)
     evidence = row.runtime_refs.get("lab_evidence", {})
-    if lab.slug == "nmap-network-recon" and not evidence.get("scan_completed"):
-        raise HTTPException(409, "Run the service scan before submitting this lab")
+    if lab.slug == "nmap-network-recon" and not (evidence.get("scan_completed") and evidence.get("rescan_verified")):
+        raise HTTPException(409, "Scan the target, close the unnecessary service, then rescan to verify its port is closed")
     if lab.slug == "sql-injection" and not (evidence.get("vulnerable_bypass_observed") and evidence.get("safe_query_observed")):
         raise HTTPException(409, "Demonstrate the vulnerable bypass and compare it with the safe query before submitting")
-    if lab.slug == "traffic-forensics" and not {"192.0.2.44", "file_upload"}.issubset(set(evidence.get("log_searches", []))):
-        raise HTTPException(409, "Search the failed-login source and the file upload before submitting")
+    if lab.slug == "traffic-forensics":
+        if not evidence.get("incident_generated"):
+            raise HTTPException(409, "Generate the training activity, then investigate its logs before submitting")
+        scenario = row.runtime_refs.get("log_scenario", LEGACY_SCENARIO)
+        missing = sorted({scenario["source"], "file_upload"} - set(evidence.get("log_searches", [])))
+        if missing:
+            raise HTTPException(409, "Investigate the failed-login source and the upload event before submitting. Use the investigation hints if needed.")
     questions = list(db.scalars(select(LabQuestion).where(LabQuestion.lab_id == row.lab_id).order_by(LabQuestion.position)))
+    prompts = {question.qid: question.prompt for question in questions}
     if not set(body.answers).issubset({q.qid for q in questions}):
         raise HTTPException(422, "Unknown question id")
     secrets_map = json.loads(decrypt(row.secrets_encrypted))
+    if lab.slug == "traffic-forensics":
+        questions = log_questions(questions, row.runtime_refs.get("log_scenario"))
+    questions = profile_questions(questions, lab.slug, row.runtime_refs.get('lab_profile'))
     flags = {q.answer_spec.get("flag_key", q.qid): secrets_map[q.answer_spec.get("flag_key", q.qid)] for q in questions if q.type == "flag" and q.answer_spec.get("flag_key", q.qid) in secrets_map}
     score, maximum, results = grade(questions, body.answers, flags, runtime, row.runtime_refs)
+    for result in results:
+        result['prompt'] = prompts.get(result['qid'], '')
     attempt = Attempt(session_id=row.id, user_id=user.id, lab_id=row.lab_id, assignment_id=row.assignment_id, is_practice=row.assignment_id is None, duration_seconds=max(0, int((now() - utc(row.started_at)).total_seconds())), score=score, max_score=maximum, answers=body.answers, per_question_results=results)
     row.status, row.ended_at, row.end_reason = "stopped", now(), "submitted"
     runtime.stop(row.runtime_refs)
     db.add(attempt)
     audit(db, user.id, "session.submitted", "lab_session", str(row.id), {"score": score, "max_score": maximum}, request.client.host if request.client else None)
     db.commit()
-    return {"attempt_id": str(attempt.id), "score": score, "max_score": maximum, "per_question_results": results, "duration_seconds": attempt.duration_seconds}
+    return {"attempt_id": str(attempt.id), "score": score, "max_score": maximum, "per_question_results": results, "duration_seconds": attempt.duration_seconds, **attempt_outcome(attempt)}
 
 
 @app.post("/api/lab-sessions/{session_id}/stop")
@@ -714,7 +796,7 @@ def connect(session_id: uuid.UUID, user: User = Depends(require_user), db: Sessi
     secret_map = json.loads(decrypt(row.secrets_encrypted))
     # The fake runtime has no terminal to discover flags in. Return their simulated
     # evidence only to the authenticated owner of this running demo session.
-    evidence = [f"Simulated training flag: {value}" for key, value in secret_map.items() if key != "vnc"]
+    evidence = [f"Simulated training flag: {value}" for key, value in secret_map.items() if key not in {"vnc", "log_scenario", "lab_profile"}]
     return {"url": "", "vnc_password": None, "placeholder": True, "evidence": evidence}
 
 
@@ -726,13 +808,15 @@ def lab_action(session_id: uuid.UUID, body: LabActionBody, request: Request, use
         raise HTTPException(403, "This lab session is not available")
     lab = db.get(Lab, row.lab_id)
     values = body.values
-    if lab.slug == "nmap-network-recon" and body.action == "scan":
+    if lab.slug == "nmap-network-recon" and body.action in {"scan", "close_service"}:
         if values:
             raise HTTPException(422, "This scan does not accept command options")
+        if body.action == "close_service" and not row.runtime_refs.get("lab_evidence", {}).get("scan_completed"):
+            raise HTTPException(409, "Run the baseline scan before closing the service")
         if not hasattr(runtime, "lab_action"):
             raise HTTPException(503, "Hands-on labs are unavailable")
         try:
-            result = runtime.lab_action(row.runtime_refs, "scan", {})
+            result = runtime.lab_action(row.runtime_refs, body.action, {})
         except RuntimeError as exc:
             raise HTTPException(503, str(exc)) from exc
     elif lab.slug == "sql-injection" and body.action in {"vulnerable_login", "safe_login"}:
@@ -740,42 +824,67 @@ def lab_action(session_id: uuid.UUID, body: LabActionBody, request: Request, use
             raise HTTPException(422, "Enter a username and password of at most 120 characters")
         if not hasattr(runtime, "lab_action"):
             raise HTTPException(503, "Hands-on labs are unavailable")
+        if body.action == "safe_login":
+            prior = row.runtime_refs.get("lab_evidence", {})
+            if not prior.get("vulnerable_bypass_observed") or values["username"] != prior.get("vulnerable_input"):
+                raise HTTPException(409, "Demonstrate the vulnerable bypass first, then apply the fix with the same username input")
         try:
             result = runtime.lab_action(row.runtime_refs, body.action, values)
         except RuntimeError as exc:
             raise HTTPException(503, str(exc)) from exc
-    elif lab.slug == "traffic-forensics" and body.action == "search_logs":
-        query = values.get("query", "").strip()
-        if set(values) != {"query"} or not 2 <= len(query) <= 80:
-            raise HTTPException(422, "Enter a search term between 2 and 80 characters")
-        if row.runtime_refs.get("runtime") != "local-logs":
-            raise HTTPException(409, "This log-analysis session is not running")
-        log_path = Path(__file__).resolve().parents[2] / "labs" / "traffic-forensics" / "sample-access.log"
-        matches = [line for line in log_path.read_text(encoding="utf-8").splitlines() if query.casefold() in line.casefold()][:20]
-        result = {"output": "\n".join(matches) if matches else "No matching evidence found.", "exit_code": 0, "matches": len(matches)}
+    elif lab.slug == "traffic-forensics" and body.action in {"search_logs", "generate_incident"}:
+        if body.action == "search_logs":
+            query = values.get("query", "").strip()
+            if set(values) != {"query"} or not 2 <= len(query) <= 80:
+                raise HTTPException(422, "Enter a search term between 2 and 80 characters")
+        elif values:
+            raise HTTPException(422, "Activity generation does not accept options")
+        if row.runtime_refs.get("runtime") != "docker":
+            raise HTTPException(409, "Start a new log-analysis session to use the interactive environment")
+        try:
+            result = runtime.lab_action(row.runtime_refs, body.action, values)
+        except RuntimeError as exc:
+            raise HTTPException(503, str(exc)) from exc
     else:
         raise HTTPException(422, "That action is not available in this lab")
-    evidence = row.runtime_refs.setdefault("lab_evidence", {})
+    evidence = dict(row.runtime_refs.get("lab_evidence", {}))
     if lab.slug == "nmap-network-recon" and result.get("exit_code") == 0:
-        evidence["scan_completed"] = True
+        close_port = row.runtime_refs.get('lab_profile', {}).get('close_port', 9001)
+        if body.action == "close_service":
+            evidence["service_closed"] = True
+        elif not evidence.get("service_closed"):
+            evidence["scan_completed"] = bool(re.search(rf"^{close_port}/tcp\s+open\b", result.get("output", ""), re.MULTILINE))
+        elif evidence.get("scan_completed"):
+            evidence["rescan_verified"] = bool(re.search(rf"^{close_port}/tcp\s+closed\b", result.get("output", ""), re.MULTILINE))
     elif lab.slug == "sql-injection":
         try:
             accounts = json.loads(result.get("output", "{}")).get("matched_accounts", [])
         except (json.JSONDecodeError, AttributeError):
             accounts = []
         if body.action == "vulnerable_login":
-            evidence["vulnerable_bypass_observed"] = len(accounts) > 1
-            evidence["vulnerable_input"] = values["username"] if len(accounts) > 1 else None
+            if len(accounts) > 1:
+                evidence["vulnerable_bypass_observed"] = True
+                evidence["vulnerable_input"] = values["username"]
         elif body.action == "safe_login":
             evidence["safe_query_observed"] = len(accounts) == 0 and values["username"] == evidence.get("vulnerable_input")
-    elif lab.slug == "traffic-forensics" and result.get("matches", 0):
-        searched = set(evidence.get("log_searches", []))
-        searched.add(values["query"].strip().casefold())
-        evidence["log_searches"] = sorted(searched)
+    elif lab.slug == "traffic-forensics" and result.get("exit_code") == 0:
+        if body.action == "generate_incident" and result.get("incident_generated"):
+            evidence["incident_generated"] = True
+        elif body.action == "search_logs" and result.get("matches", 0):
+            searched = set(evidence.get("log_searches", []))
+            # Credit the evidence inspected, including searches such as action=file_upload.
+            scenario = row.runtime_refs.get("log_scenario", LEGACY_SCENARIO)
+            for term in (scenario["source"], "file_upload"):
+                if term in result.get("output", "").casefold():
+                    searched.add(term)
+            evidence["log_searches"] = sorted(searched)
+    # SQLAlchemy's JSON columns do not notice edits to nested dictionaries.
+    # Assign a new root object so activity evidence survives the request.
+    row.runtime_refs = {**row.runtime_refs, "lab_evidence": evidence}
     row.last_activity_at = now()
     audit(db, user.id, "lab.action", "lab_session", str(row.id), {"lab": lab.slug, "action": body.action}, request.client.host if request.client else None)
     db.commit()
-    return result
+    return {**result, "lab_evidence": public_evidence(row)}
 
 
 @app.get("/internal/lab-auth")
@@ -804,9 +913,11 @@ def attempt_detail(attempt_id: uuid.UUID, user: User = Depends(require_user), db
     if user.role == "student" and row.user_id != user.id:
         raise HTTPException(404, "Attempt not found")
     if user.role == "teacher":
-        session = db.get(LabSession, row.session_id)
-        assignment_for_student(db, session.assignment_id, user) if session.assignment_id else (_ for _ in ()).throw(HTTPException(404, "Attempt not found"))
-    return {"id": str(row.id), "score": row.score, "max_score": row.max_score, "submitted_at": row.submitted_at.isoformat(), "duration_seconds": row.duration_seconds, "answers": row.answers, "per_question_results": row.per_question_results}
+        if row.assignment_id:
+            assignment_for_student(db, row.assignment_id, user)
+        elif not (row.is_practice and db.scalar(select(ClassMember.id).join(Classroom, Classroom.id == ClassMember.class_id).where(ClassMember.student_id == row.user_id, Classroom.teacher_id == user.id))):
+            raise HTTPException(404, "Attempt not found")
+    return {"id": str(row.id), "score": row.score, "max_score": row.max_score, "submitted_at": row.submitted_at.isoformat(), "duration_seconds": row.duration_seconds, "answers": row.answers, "per_question_results": row.per_question_results, **attempt_outcome(row)}
 
 
 @app.get("/api/monitor/sessions")
@@ -815,7 +926,15 @@ def monitor(user: User = Depends(require_user), db: Session = Depends(get_db)):
     query = select(LabSession).where(LabSession.status.in_(["starting", "running"]))
     if user.role == "teacher":
         query = query.join(Assignment, Assignment.id == LabSession.assignment_id).join(Classroom, Classroom.id == Assignment.class_id).where(Classroom.teacher_id == user.id)
-    return [{"id": str(s.id), "student_id": str(s.user_id), "lab_id": str(s.lab_id), "status": s.status, "started_at": s.started_at.isoformat(), "expires_at": s.expires_at.isoformat()} for s in db.scalars(query)]
+    output = []
+    for session in db.scalars(query):
+        student, lab = db.get(User, session.user_id), db.get(Lab, session.lab_id)
+        assignment = db.get(Assignment, session.assignment_id) if session.assignment_id else None
+        classroom = db.get(Classroom, assignment.class_id) if assignment else None
+        output.append({'id': str(session.id), 'student_id': str(session.user_id), 'student_name': f'{student.first_name} {student.last_name}',
+                       'lab_id': str(session.lab_id), 'lab_title': lab.title, 'class_name': classroom.name if classroom else 'Practice',
+                       'status': session.status, 'started_at': utc(session.started_at).isoformat(), 'expires_at': utc(session.expires_at).isoformat()})
+    return output
 
 
 @app.post("/api/monitor/sessions/{session_id}/terminate")
@@ -902,14 +1021,14 @@ def admin_reset_password(user_id: uuid.UUID, user: User = Depends(require_user),
 @app.get("/api/admin/labs")
 def admin_labs(user: User = Depends(require_user), db: Session = Depends(get_db)):
     role(user, "admin")
-    return [{"id": str(x.id), "slug": x.slug, "title": x.title, "enabled": x.enabled, "manifest": public_manifest(x.manifest)} for x in db.scalars(select(Lab))]
+    return [{"id": str(x.id), "slug": x.slug, "title": x.title, "enabled": x.enabled, "manifest": public_manifest(x.manifest)} for x in db.scalars(select(Lab).where(Lab.slug.in_(PROTOTYPE_LAB_SLUGS)))]
 
 
 @app.patch("/api/admin/labs/{lab_id}")
 def set_lab(lab_id: uuid.UUID, enabled: bool, user: User = Depends(require_user), db: Session = Depends(get_db)):
     role(user, "admin")
     lab = db.get(Lab, lab_id)
-    if not lab:
+    if not lab or lab.slug not in PROTOTYPE_LAB_SLUGS:
         raise HTTPException(404, "Lab not found")
     lab.enabled = enabled
     db.commit()
@@ -925,9 +1044,8 @@ def sync_labs(user: User = Depends(require_user), db: Session = Depends(get_db))
 
 def sync_packages(db: Session) -> int:
     # Keep the college prototype focused on the three guided, hands-on labs.
-    prototype_slugs = {"nmap-network-recon", "sql-injection", "traffic-forensics"}
-    packages = [package for package in load_packages(settings.lab_root) if package[0]["slug"] in prototype_slugs]
-    for extra_lab in db.scalars(select(Lab).where(Lab.slug.notin_(prototype_slugs))):
+    packages = [package for package in load_packages(settings.lab_root) if package[0]["slug"] in PROTOTYPE_LAB_SLUGS]
+    for extra_lab in db.scalars(select(Lab).where(Lab.slug.notin_(PROTOTYPE_LAB_SLUGS))):
         extra_lab.enabled = False
     for manifest, guide in packages:
         lab = db.scalar(select(Lab).where(Lab.slug == manifest["slug"]))
@@ -980,7 +1098,7 @@ def update_admin_settings(body: SettingPatch, user: User = Depends(require_user)
 def system(user: User = Depends(require_user), db: Session = Depends(get_db)):
     role(user, "admin")
     rows = list(db.scalars(select(LabSession).where(LabSession.status.in_(["starting", "running"]))))
-    return {"active_sessions": len(rows), "capacity": settings.max_active_sessions, "runtime": "Docker-backed for Nmap and SQL labs", "sessions": [{"id": str(s.id), "owner_id": str(s.user_id), "lab_id": str(s.lab_id), "status": s.status, "stats": runtime.stats(s.runtime_refs)} for s in rows]}
+    return {"active_sessions": len(rows), "capacity": settings.max_active_sessions, "runtime": "Disposable Docker environments for all three labs", "sessions": [{"id": str(s.id), "owner_id": str(s.user_id), "lab_id": str(s.lab_id), "status": s.status, "stats": runtime.stats(s.runtime_refs)} for s in rows]}
 
 
 @app.post("/api/admin/system/terminate-all")
@@ -1007,6 +1125,9 @@ def assignment_results(assignment_id: uuid.UUID, user: User = Depends(require_us
     assignment = assignment_for_student(db, assignment_id, user) if user.role == "teacher" else db.get(Assignment, assignment_id)
     if not assignment:
         raise HTTPException(404, "Assignment not found")
+    assignment_lab = db.get(Lab, assignment.lab_id)
+    if not assignment_lab or not assignment_lab.enabled or assignment_lab.slug not in PROTOTYPE_LAB_SLUGS:
+        raise HTTPException(404, "Assignment not found")
     targets = list(db.scalars(select(AssignmentTarget).where(AssignmentTarget.assignment_id == assignment.id)))
     output = []
     for target in targets:
@@ -1015,7 +1136,11 @@ def assignment_results(assignment_id: uuid.UUID, user: User = Depends(require_us
         best_score = max((a.score for a in attempts), default=None)
         latest_score = attempts[-1].score if attempts else None
         selected_score = best_score if assignment.scoring_policy == "best" else latest_score
-        output.append({"student_id": str(target.student_id), "name": f"{student.first_name} {student.last_name}", "status": "submitted" if attempts else "not started", "attempts": len(attempts), "score": selected_score, "best_score": best_score, "latest_score": latest_score})
+        chosen = selected_attempt(assignment, attempts)
+        output.append({"student_id": str(target.student_id), "name": f"{student.first_name} {student.last_name}", "status": "submitted" if attempts else "not started", "attempts": len(attempts), "score": selected_score, "best_score": best_score, "latest_score": latest_score,
+                       "max_score": chosen.max_score if chosen else None, "passed": passed_attempt(chosen) if chosen else False,
+                       "needs_reattempt": bool(chosen and not passed_attempt(chosen)), "percentage": attempt_outcome(chosen)['percentage'] if chosen else None,
+                       "duration_seconds": sum(item.duration_seconds for item in attempts), "submitted_at": utc(chosen.submitted_at).isoformat() if chosen else None})
     return output
 
 
@@ -1027,20 +1152,79 @@ def student_history(student_id: uuid.UUID, lab: uuid.UUID | None = None, user: U
         class_ids = select(Classroom.id).where(Classroom.teacher_id == user.id)
         if not db.scalar(select(ClassMember.id).where(ClassMember.student_id == student_id, ClassMember.class_id.in_(class_ids))):
             raise HTTPException(404, "History not found")
-    query = select(Attempt).where(Attempt.user_id == student_id)
+    query = select(Attempt).join(Lab, Lab.id == Attempt.lab_id).where(Attempt.user_id == student_id, Lab.enabled.is_(True), Lab.slug.in_(PROTOTYPE_LAB_SLUGS))
+    if user.role == 'teacher':
+        query = query.where((Attempt.is_practice.is_(True) & Attempt.assignment_id.is_(None)) | Attempt.assignment_id.in_(select(Assignment.id).where(Assignment.class_id.in_(class_ids))))
     if lab:
         query = query.where(Attempt.lab_id == lab)
-    return [{"id": str(x.id), "lab_id": str(x.lab_id), "assignment_id": str(x.assignment_id) if x.assignment_id else None, "is_practice": x.is_practice, "score": x.score, "max_score": x.max_score, "submitted_at": x.submitted_at.isoformat()} for x in db.scalars(query.order_by(Attempt.submitted_at.desc()))]
+    return [{"id": str(x.id), "session_id": str(x.session_id), "lab_id": str(x.lab_id), "assignment_id": str(x.assignment_id) if x.assignment_id else None, "is_practice": x.is_practice, "score": x.score, "max_score": x.max_score, "submitted_at": utc(x.submitted_at).isoformat(), "duration_seconds": x.duration_seconds, **attempt_outcome(x)} for x in db.scalars(query.order_by(Attempt.submitted_at.desc()))]
 
 
 @app.get("/api/analytics/classes/{class_id}")
 def analytics(class_id: uuid.UUID, user: User = Depends(require_user), db: Session = Depends(get_db)):
     classroom = owned_class(db, user, class_id)
     role(user, "teacher", "admin")
-    assignments = list(db.scalars(select(Assignment).where(Assignment.class_id == classroom.id)))
+    assignments = list(db.scalars(select(Assignment).join(Lab, Lab.id == Assignment.lab_id).where(Assignment.class_id == classroom.id, Lab.enabled.is_(True), Lab.slug.in_(PROTOTYPE_LAB_SLUGS))))
     target_count = sum(db.scalar(select(func.count()).select_from(AssignmentTarget).where(AssignmentTarget.assignment_id == a.id)) or 0 for a in assignments)
-    attempts = list(db.scalars(select(Attempt).join(Assignment, Assignment.id == Attempt.assignment_id).where(Assignment.class_id == class_id)))
-    return {"assignment_count": len(assignments), "target_count": target_count, "submitted_count": len(attempts), "completion_rate": round(len({(a.assignment_id, a.user_id) for a in attempts}) / target_count, 4) if target_count else 0, "average_score": round(sum(a.score / a.max_score for a in attempts) / len(attempts), 4) if attempts else None}
+    attempts = list(db.scalars(select(Attempt).join(Assignment, Assignment.id == Attempt.assignment_id).join(Lab, Lab.id == Attempt.lab_id).where(Assignment.class_id == class_id, Lab.enabled.is_(True), Lab.slug.in_(PROTOTYPE_LAB_SLUGS))))
+    results = [item for assignment in assignments for item in assignment_results(assignment.id, user, db)]
+    selected = [item for item in results if item['score'] is not None]
+    passed_count = sum(item['passed'] for item in results)
+    return {"assignment_count": len(assignments), "target_count": target_count, "submitted_count": len(selected), "attempt_count": len(attempts), "passed_count": passed_count,
+            "needs_reattempt_count": sum(item['needs_reattempt'] for item in results), "completion_rate": round(passed_count / target_count, 4) if target_count else 0,
+            "average_score": round(sum(item['percentage'] for item in selected) / len(selected) / 100, 4) if selected else None, "pass_mark": PASS_PERCENT}
+
+
+@app.get('/api/classes/{class_id}/workspace')
+def class_workspace(class_id: uuid.UUID, user: User = Depends(require_user), db: Session = Depends(get_db)):
+    classroom = owned_class(db, user, class_id)
+    if user.role == 'student' and not db.scalar(select(ClassMember.id).where(ClassMember.class_id == class_id, ClassMember.student_id == user.id)):
+        raise HTTPException(404, 'Class not found')
+    teacher = db.get(User, classroom.teacher_id)
+    query = select(Assignment).join(Lab, Lab.id == Assignment.lab_id).where(Assignment.class_id == class_id, Lab.enabled.is_(True), Lab.slug.in_(PROTOTYPE_LAB_SLUGS))
+    if user.role == 'student':
+        query = query.join(AssignmentTarget).where(AssignmentTarget.student_id == user.id)
+    work = []
+    for assignment in db.scalars(query.order_by(Assignment.created_at.desc())):
+        lab = db.get(Lab, assignment.lab_id)
+        item = {'id': str(assignment.id), 'title': assignment.title, 'lab_id': str(lab.id), 'lab_title': lab.title, 'instructions': assignment.instructions,
+                'due_at': utc(assignment.due_at).isoformat() if assignment.due_at else None, 'scoring_policy': assignment.scoring_policy, 'max_attempts': assignment.max_attempts}
+        if user.role == 'student':
+            attempts = list(db.scalars(select(Attempt).where(Attempt.assignment_id == assignment.id, Attempt.user_id == user.id)))
+            chosen = selected_attempt(assignment, attempts)
+            active = db.scalar(select(LabSession.id).where(LabSession.assignment_id == assignment.id, LabSession.user_id == user.id, LabSession.status.in_(['starting', 'running'])))
+            item.update({'attempts': len(attempts), 'status': ('Passed' if passed_attempt(chosen) else 'Needs reattempt') if chosen else ('In progress' if active else 'Not started'),
+                         'score': chosen.score if chosen else None, 'max_score': chosen.max_score if chosen else None, 'active_session_id': str(active) if active else None,
+                         'passed': passed_attempt(chosen) if chosen else False})
+        else:
+            item['students'] = assignment_results(assignment.id, user, db)
+        work.append(item)
+    response = {'id': str(classroom.id), 'name': classroom.name, 'term': classroom.term, 'teacher': f'{teacher.first_name} {teacher.last_name}', 'assignments': work, 'pass_mark': PASS_PERCENT}
+    if user.role == 'student':
+        membership = db.scalar(select(ClassMember).where(ClassMember.class_id == class_id, ClassMember.student_id == user.id))
+        response['joined_at'] = utc(membership.created_at).isoformat()
+    if user.role != 'student':
+        response['join_code'] = classroom.join_code if classroom.join_code_enabled else None
+        response['analytics'] = analytics(class_id, user, db)
+        roster = members(class_id, user, db)
+        student_ids = [uuid.UUID(student['id']) for student in roster]
+        practice = list(db.execute(select(Attempt, Lab, User).join(Lab, Lab.id == Attempt.lab_id).join(User, User.id == Attempt.user_id).where(
+            Attempt.user_id.in_(student_ids), Attempt.is_practice.is_(True), Attempt.assignment_id.is_(None),
+            Lab.enabled.is_(True), Lab.slug.in_(PROTOTYPE_LAB_SLUGS)).order_by(Attempt.submitted_at.desc())))
+        response['extra_practice'] = [{'id': str(attempt.id), 'student_id': str(student.id), 'student_name': f'{student.first_name} {student.last_name}',
+                                      'lab_id': str(lab.id), 'lab_title': lab.title, 'score': attempt.score, 'max_score': attempt.max_score,
+                                      'submitted_at': utc(attempt.submitted_at).isoformat(), 'duration_seconds': attempt.duration_seconds,
+                                      **attempt_outcome(attempt)} for attempt, lab, student in practice]
+        for student in roster:
+            rows = [result for item in work for result in item['students'] if result['student_id'] == student['id']]
+            student.update({'assigned': len(rows), 'submitted': sum(row['score'] is not None for row in rows), 'passed': sum(row['passed'] for row in rows),
+                            'needs_reattempt': sum(row['needs_reattempt'] for row in rows), 'attempts': sum(row['attempts'] for row in rows),
+                            'duration_seconds': sum(row['duration_seconds'] for row in rows)})
+            extra = [item for item in response['extra_practice'] if item['student_id'] == student['id']]
+            student['extra_practice_attempts'] = len(extra)
+            student['extra_labs_passed'] = len({item['lab_id'] for item in extra if item['passed']})
+        response['students'] = roster
+    return response
 
 
 @app.get("/api/assignments/{assignment_id}/export.csv")
@@ -1056,10 +1240,10 @@ def export_csv(assignment_id: uuid.UUID, user: User = Depends(require_user), db:
         owned_class(db, user, assignment.class_id)
     stream = StringIO()
     out = writer(stream)
-    out.writerow(["student_email", "attempts", "selected_score", "best_score", "latest_score"])
+    out.writerow(["student_email", "attempts", "selected_score", "max_score", "percentage", "result", "best_score", "latest_score", "time_spent_seconds"])
     for row in assignment_results(assignment_id, user, db):
         student = db.get(User, uuid.UUID(row["student_id"]))
-        out.writerow([student.email, row["attempts"], row["score"], row["best_score"], row["latest_score"]])
+        out.writerow([student.email, row["attempts"], row["score"], row['max_score'], row['percentage'], 'Passed' if row['passed'] else 'Needs reattempt' if row['needs_reattempt'] else 'Not submitted', row["best_score"], row["latest_score"], row['duration_seconds']])
     return PlainTextResponse(stream.getvalue(), media_type="text/csv", headers={"Content-Disposition": f"attachment; filename=assignment-{assignment_id}.csv"})
 
 

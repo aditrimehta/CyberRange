@@ -4,10 +4,10 @@ summary: Compare an intentionally unsafe login query with a parameterized versio
 category: Application Security
 difficulty: beginner
 estimated_minutes: 30
-version: 2
+version: 4
 objectives: ["Observe unsafe SQL string construction", "Test the training login with controlled input", "Compare the result with a parameterized query"]
 questions:
-  - {id: q1, type: mcq, prompt: "Which input demonstrated that the vulnerable login query can be altered?", points: 10, options: ["' OR '1'='1' -- ", admin, "<script>alert(1)</script>", "../"], answer: "' OR '1'='1' -- ", explanation: "The quote changes the SQL expression in this deliberately vulnerable local exercise.", hints: ["Use the username field and choose the vulnerable login action."]}
+  - {id: q1, type: mcq, prompt: "What part of the training payload makes the vulnerable login condition true?", points: 10, options: ["An always-true OR condition", "The username admin", "An HTML script tag", "A file path"], answer: "An always-true OR condition", explanation: "The injected OR expression can evaluate to true while a SQL comment removes the remaining password check.", hints: ["Read the payload explanation and compare the query output."]}
   - {id: q2, type: short_text, prompt: "What defense keeps user values separate from SQL syntax?", points: 10, accepted: ["parameterized queries", "prepared statements", "parameter binding"], explanation: "Bound parameters are treated as data rather than SQL syntax.", hints: ["The safe action binds each value separately."]}
   - {id: q3, type: numeric, prompt: "How many sample accounts are listed after the vulnerable bypass?", points: 10, answer: 3, tolerance: 0, explanation: "The disposable training database contains three sample accounts.", hints: ["Inspect the matched_accounts returned by the vulnerable action."]}
   - {id: q4, type: short_text, prompt: "Which role belongs to the admin account returned by the vulnerable action?", points: 20, accepted: [administrator], explanation: "The first training account has the administrator role.", hints: ["Read the role field in the action output."]}

@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     session_cookie: str = "cr_session"
     secure_cookies: bool = False
     lab_root: str = "../labs"
+    lab_vm_distro: str = ""
     max_active_sessions: int = 40
     max_sessions_per_user: int = 1
     allow_session_extension: bool = False

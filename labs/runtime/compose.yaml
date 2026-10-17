@@ -6,7 +6,15 @@ services:
     command: ["python", "/app/target.py"]
     environment:
       PYTHONDONTWRITEBYTECODE: "1"
+      CR_LAB_PROFILE: ${CR_LAB_PROFILE:-}
     read_only: true
+    tmpfs:
+      - /state:uid=10001,gid=10001,mode=0700,size=8m
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080', timeout=2)"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     mem_limit: 128m

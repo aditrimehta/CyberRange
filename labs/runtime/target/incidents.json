@@ -1,0 +1,6 @@
+{
+  "actors": ["alex", "mira", "jordan", "sam", "riley", "taylor"],
+  "sources": ["192.0.2.44", "192.0.2.73", "198.51.100.28", "198.51.100.91", "203.0.113.16", "203.0.113.82"],
+  "failure_counts": [3, 4, 5, 6],
+  "files": ["draft.zip", "budget.csv", "notes.txt", "report.pdf", "backup.tar", "roster.csv"]
+}

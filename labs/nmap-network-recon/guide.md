@@ -4,10 +4,11 @@ This lab starts a disposable target on a private Docker network. The workspace r
 
 ## Tasks
 
-1. Select **Run service scan** in the interactive panel.
+1. Select **Scan the host** in the interactive panel.
 2. Read the output and count the ports marked `open`.
-3. Compare the service/version banner on ports 2222, 8080, and 9001.
-4. Answer the questions using the scan evidence.
-5. Submit your answers to receive a score and explanations.
+3. Read the service/version and banner output. Your session may include an additional status listener, and its unnecessary service name and port can differ from another student's.
+4. Read your session briefing, then select **Close unnecessary service**. This stops the listener on the port specified for your session.
+5. Select **Rescan and verify**. The selected port should be closed; the other services stay open.
+6. Answer the questions and submit. Use the baseline scan when asked about the initial services.
 
-The target exposes only three small training services and has no published host ports. The lab network has no route to external networks. Stop the session when finished; its containers are removed automatically.
+The target exposes three or four small training services and has no published host ports. Banners are collected explicitly so you can identify the service even when Nmap's guessed service name differs. Use your own baseline for the open-port count and banner question. Submit below the answers. Reach 80% to pass; otherwise review feedback and reattempt.

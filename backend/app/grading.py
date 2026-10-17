@@ -24,7 +24,7 @@ def grade(questions: list[Any], answers: dict[str, Any], flags: dict[str, str], 
             correct = any(candidate == " ".join(str(v).casefold().split()) for v in valid)
             patterns = spec.get("regex", [])
             correct = correct or any(re.fullmatch(pattern, str(submitted), re.IGNORECASE) is not None for pattern in patterns)
-        elif kind == "check" and runtime is not None and refs:
+        elif kind == "check" and runtime is not None and refs is not None:
             check = spec["check"]
             out, code = runtime.exec(refs, check["target"], check["command"], int(check.get("timeout", 5)))
             correct = code == check.get("exit_code", 0) and (not check.get("stdout_contains") or check["stdout_contains"] in out)

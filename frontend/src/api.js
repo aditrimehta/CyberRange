@@ -19,7 +19,8 @@ export async function api(path, init = {}) {
     const response = await fetch(path.startsWith('/api') || path.startsWith('/internal') ? path : `/api${path}`, { ...init, headers, credentials: 'include' });
     if (!response.ok) {
         const payload = await response.json().catch(() => ({ detail: 'The request could not be completed.' }));
-        throw new Error(payload.detail ?? 'The request could not be completed.');
+        const detail = payload.detail;
+        throw Object.assign(new Error(typeof detail === 'string' ? detail : detail?.message ?? 'The request could not be completed.'), { status: response.status, detail });
     }
     if (response.status === 204)
         return undefined;

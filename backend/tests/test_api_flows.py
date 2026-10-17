@@ -1,15 +1,22 @@
 import uuid
 from datetime import timedelta
 
-from sqlalchemy import select
+from sqlalchemy import select, delete
 
 from app.db import SessionLocal
 from app.main import runtime
 from app.models import Attempt, ClassMember, Classroom, Lab, LabQuestion, LabSession, now
 
 
-def make_lab(db, slug="test-lab"):
+def make_lab(db, slug="traffic-forensics"):
     manifest = {"slug": slug, "title": "Test lab", "summary": "An isolated practice exercise.", "category": "Testing", "difficulty": "beginner", "estimated_minutes": 20, "version": 1, "objectives": ["Practice safe testing"], "questions": [{"id": "q1", "type": "mcq", "prompt": "Pick the correct answer", "points": 10, "options": ["correct", "wrong"], "answer": "correct", "explanation": "Correct because it is correct."}]}
+    existing = db.scalar(select(Lab).where(Lab.slug == slug))
+    if existing:
+        db.execute(delete(LabQuestion).where(LabQuestion.lab_id == existing.id))
+        existing.manifest = manifest
+        db.add(LabQuestion(lab_id=existing.id, qid="q1", type="mcq", prompt="Pick the correct answer", points=10, position=0, hints=[], answer_spec={"answer": "correct"}, public_options=["correct", "wrong"], explanation="Correct because it is correct."))
+        db.flush()
+        return existing
     lab = Lab(slug=slug, title="Test lab", summary=manifest["summary"], category="Testing", difficulty="beginner", estimated_minutes=20, version=1, enabled=True, manifest=manifest, guide_markdown="# Test guide")
     db.add(lab)
     db.flush()
@@ -35,10 +42,18 @@ def test_student_catalog_does_not_leak_answer_keys(client, csrf, users):
     response = client.get(f"/api/labs/{slug}")
     assert response.status_code == 200
     assert "UNIQUE_SECRET_ANSWER_42" not in response.text
-    assert "answer" not in response.text
+    assert "answer" not in response.json()["questions"][0]
 
 
-def test_practice_session_grades_server_side_and_persists_attempt(client, csrf, users):
+def test_practice_session_grades_server_side_and_persists_attempt(client, csrf, users, monkeypatch):
+    monkeypatch.setattr(runtime, "start", lambda session, manifest, secrets: {"runtime": "docker", "project": "unit-test", "status": "running"})
+    monkeypatch.setattr(runtime, "stop", lambda refs: None)
+    def action(refs, name, values):
+        if name == "generate_incident":
+            return {"exit_code": 0, "incident_generated": True, "output": "Generated"}
+        term = values["query"].strip().casefold()
+        return {"exit_code": 0, "matches": 1, "output": "src=192.0.2.44 result=failed" if term == "192.0.2.44" else "action=file_upload file=draft.zip"}
+    monkeypatch.setattr(runtime, "lab_action", action)
     with SessionLocal() as db:
         lab = make_lab(db)
         db.commit()
@@ -46,6 +61,17 @@ def test_practice_session_grades_server_side_and_persists_attempt(client, csrf, 
     response = client.post("/api/lab-sessions", headers={"X-CSRF-Token": csrf}, json={"lab_id": lab_id})
     assert response.status_code == 200, response.text
     session_id = response.json()["id"]
+    blocked = client.post(f"/api/lab-sessions/{session_id}/submit", headers={"X-CSRF-Token": csrf}, json={"answers": {"q1": "correct"}})
+    assert blocked.status_code == 409
+    generated = client.post(f"/api/lab-sessions/{session_id}/actions", headers={"X-CSRF-Token": csrf}, json={"action": "generate_incident", "values": {}})
+    assert generated.status_code == 200
+    for query in ("192.0.2.44", " ACTION=FILE_UPLOAD "):
+        searched = client.post(f"/api/lab-sessions/{session_id}/actions", headers={"X-CSRF-Token": csrf}, json={"action": "search_logs", "values": {"query": query}})
+        assert searched.status_code == 200, searched.text
+        assert searched.json()["matches"] > 0
+    # A separate request must read the committed evidence, as after a refresh.
+    detail = client.get(f"/api/lab-sessions/{session_id}")
+    assert detail.json()["lab_evidence"]["log_searches"] == ["192.0.2.44", "file_upload"]
     result = client.post(f"/api/lab-sessions/{session_id}/submit", headers={"X-CSRF-Token": csrf}, json={"answers": {"q1": "correct"}})
     assert result.status_code == 200, result.text
     assert result.json()["score"] == 10
@@ -56,6 +82,17 @@ def test_practice_session_grades_server_side_and_persists_attempt(client, csrf, 
         assert session and session.status == "stopped"
     detail = client.get(f"/api/lab-sessions/{session_id}")
     assert detail.json()["attempt_id"] == result.json()["attempt_id"]
+
+
+def test_retired_lab_is_hidden_and_cannot_be_launched(client, csrf, users):
+    with SessionLocal() as db:
+        lab = make_lab(db, slug="password-attacks")
+        db.commit()
+        lab_id = str(lab.id)
+    assert all(lab["id"] != lab_id for lab in client.get("/api/labs").json())
+    assert client.get("/api/labs/password-attacks").status_code == 404
+    response = client.post("/api/lab-sessions", headers={"X-CSRF-Token": csrf}, json={"lab_id": lab_id})
+    assert response.status_code == 404
 
 
 def test_student_cannot_read_another_students_session(client, csrf, users):

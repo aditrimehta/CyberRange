@@ -9,13 +9,14 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.db import Base, SessionLocal, engine
-from app.main import app, runtime
+from app.main import app, runtime, limiter
 from app.models import User, now
 from app.security import hash_password
 
 
 @pytest.fixture(autouse=True)
 def clean_database():
+    limiter._storage.reset()
     Base.metadata.drop_all(engine)
     Base.metadata.create_all(engine)
     if hasattr(runtime, "sessions"):
